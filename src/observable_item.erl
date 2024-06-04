@@ -7,6 +7,8 @@
          fail/1,
          ignore/0,
          complete/0,
+         is_a_next_item/1,
+         get_value_from_next_item/1,
          liftM/2]).
 
 -export_type([t/2]).
@@ -90,6 +92,21 @@ bind(ObservableItemA, Fun) ->
 liftM(Fun, ObservableItemA) ->
     LiftFun = fun(Value) -> create(apply(Fun, [Value])) end,
     bind(ObservableItemA, LiftFun).
+
+-spec is_a_next_item(observable_item:t(A, ErrorInfo)) -> boolean()
+    when A :: any(),
+         ErrorInfo :: any().
+is_a_next_item({next, _Value}) ->
+    true;
+is_a_next_item(_) ->
+    false.
+
+-spec get_value_from_next_item(observable_item:t(A, ErrorInfo)) -> A when
+    A :: any(),
+    ErrorInfo :: any().
+
+get_value_from_next_item({next, Value}) ->
+    Value. 
 
 %%%===================================================================
 %%% Internal functions
