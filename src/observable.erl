@@ -5,6 +5,8 @@
 -export([create/1,
          from_list/1,
          from_value/1,
+         zip2/2,
+         zip/1,
          bind/2,
          subscribe/2]).
 
@@ -94,7 +96,66 @@ from_value(Value) ->
     ItemProducer = fun(State) -> {observable_item:create(Value), State} end,
     create(ItemProducer).
     
-      
+-spec zip2(ObservableA, ObservableB) -> ObservableC
+    when ObservableA :: observable:t(A, ErrorInfo),
+         ObservableB :: observable:t(B, ErrorInfo),
+         ObservableC :: observable:t({A, B}, ErrorInfo),
+         A :: any(),
+         B :: any(),
+         ErrorInfo :: any().
+
+zip2(#observable{item_producer = ItemProducerA} = _ObservableA,
+     #observable{item_producer = ItemProducerB} = _ObservableB) ->
+    create(
+        fun(State) ->
+            {ItemA, NewStateA} = apply(ItemProducerA, [State]),
+            {ItemB, NewStateB} = apply(ItemProducerB, [State]),
+            NewState = maps:merge(NewStateA, NewStateB),
+            {{ItemA, ItemB}, NewState}
+        end      
+    ).
+
+-spec zip(Observables) -> Observable
+    when Observable :: observable:t(list(), ErrorInfo),
+         Observables :: list(observable:t(A, ErrorInfo)),
+         A :: any(),
+         ErrorInfo :: any().
+
+zip(Observables) ->
+    create(
+        fun(State) ->
+            apply_zipped_observables(Observables, [], State)
+        end
+    ).
+
+    
+-spec apply_zipped_observables(Observables, Result, State) -> observable_item:t(list(), ErrorInfo) when
+    Observables :: [observable:t(A, ErrorInfo)],
+    Result      :: list(),
+    State       :: state(),
+    A           :: any(),
+    ErrorInfo   :: any().
+
+apply_zipped_observables([], Result, State) ->
+    {{next, Result}, State};
+apply_zipped_observables([Observable | Observables], Result, State) ->
+    #observable{item_producer = ItemProducer} = Observable,
+    
+     case apply(ItemProducer, State) of
+        {ignore, NewState} -> 
+            MergedNewState = mpas:merge(NewState, State),
+            apply_zipped_observables(Observables, Result, MergedNewState);
+        {{next, Item}, NewState} ->
+            MergedNewState = mpas:merge(NewState, State),
+            apply_zipped_observables(Observables, [Item|Result], MergedNewState);
+        {{on_error, ErrorInfo}, NewState} ->
+            {{error, ErrorInfo}, maps:merge(State, NewState)};
+        {complete, NewState} ->
+            {complete, maps:merge(State, NewState)}
+    end.
+            
+
+
 
 %%%===================================================================
 %%% Internal functions

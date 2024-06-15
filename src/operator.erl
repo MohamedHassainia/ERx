@@ -50,20 +50,15 @@ map(MapFun) ->
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
 filter(Pred) ->
-    fun(ItemProducer) ->
-        observable:create(
-            fun(State) ->
-                {Item, NewState} = apply(ItemProducer, [State]),
-                case observable_item:is_a_next_item(Item) andalso 
-                       apply(Pred, [observable_item:get_value_from_next_item(Item)]) of
+    ?operator(ItemProducer, State,
+             ({Item, NewState} = apply(ItemProducer, [State]),
+             case observable_item:is_a_next_item(Item) andalso 
+                    apply(Pred, [observable_item:get_value_from_next_item(Item)]) of
                         true ->
                             {observable_item:ignore(), NewState};
                         false ->
                             {Item, NewState}
-                end
-            end
-        )
-    end.
+             end)).
 
 
 %%--------------------------------------------------------------------
