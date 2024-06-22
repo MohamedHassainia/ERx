@@ -4,6 +4,7 @@
 %% API
 -export([map/1,
          take/1,
+         take_while/1,
          filter/1]).
 
 %%%===================================================================
@@ -50,15 +51,20 @@ map(MapFun) ->
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
 filter(Pred) ->
-    ?operator(ItemProducer, State,
-             ({Item, NewState} = apply(ItemProducer, [State]),
-             case observable_item:is_a_next_item(Item) andalso 
-                    apply(Pred, [observable_item:get_value_from_next_item(Item)]) of
+    fun(ItemProducer) ->
+        observable:create(
+            fun(State) ->
+                {Item, NewState} = apply(ItemProducer, [State]),
+                case observable_item:is_a_next_item(Item) andalso 
+                       apply(Pred, [observable_item:get_value_from_next_item(Item)]) of
                         true ->
-                            {observable_item:ignore(), NewState};
+                            {Item, NewState};
                         false ->
-                            {Item, NewState}
-             end)).
+                            {observable_item:ignore(), NewState}
+                end
+            end
+        )
+    end.
 
 
 %%--------------------------------------------------------------------
@@ -79,7 +85,7 @@ take(N) when N > 0 ->
                         {Item, maps:put(Ref, N - 1, NewState)};
                     NItem -> % TDOO add condition N is bigger or equal to zero
                         {Value, NewState} = apply(ItemProducer, [State]),
-                        {Value, maps:put(NewState, Ref, NItem - 1)}
+                        {Value, maps:put(Ref, NItem - 1, NewState)}
                 end
             end
         )
@@ -100,9 +106,16 @@ take_while(Pred) ->
                     false ->
                         {Item, NewState};
                     true ->
-
-
+                        case apply(Pred, [observable_item:get_value_from_next_item(Item)]) of
+                            true ->
+                                {Item, NewState};
+                            false ->
+                                {complete, NewState}
+                        end
+                end
+            end
         )
+    end.
 
 %%%===================================================================
 %%% Internal functions

@@ -3,6 +3,7 @@
 
 %% API
 -export([create/1,
+         get_callback_function/2,
          create/3]).
 
 -export_type([t/2,
@@ -26,8 +27,9 @@
 }.
 
 -type on_next(A)    :: fun((A) -> any()).
--type on_error(E)   :: fun((E) -> any()).
+-type on_error(ErrorInfo)   :: fun((ErrorInfo) -> any()).
 -type on_complete() :: fun(() -> any()).
+-type callback_fun(A, ErrorInfo) :: on_next(A) | on_error(ErrorInfo) | on_complete() | undefined.
 
 %%%===================================================================
 %%% API
@@ -56,6 +58,20 @@ create(OnNext) ->
 create(OnNext, OnError, OnComplete) ->
     #subscriber{on_next = OnNext, on_error =  OnError, on_complete = OnComplete}.
 
+%%--------------------------------------------------------------------
+-spec get_callback_function(CallbackFunName, Subscriber) -> callback_fun(A, ErrorInfo) when
+    CallbackFunName :: on_next | on_error | on_complete,
+    Subscriber      :: subscriber:t(A, ErrorInfo),
+    A               :: any(),
+    ErrorInfo       :: any().
+%%--------------------------------------------------------------------
+get_callback_function(CallbackFunName, Subscriber) ->
+    #subscriber{on_next = OnNext, on_complete = OnComplete, on_error = OnError} = Subscriber,
+    case CallbackFunName of
+        on_next when OnNext /= undefined -> OnNext;
+        on_complete -> OnComplete;
+        on_error -> OnError
+    end.
 
 %%%===================================================================
 %%% Internal functions

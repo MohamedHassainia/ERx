@@ -26,7 +26,7 @@
 }).
 
 -type t(A, ErrorInfo) :: #observable{
-    state          :: any() | undefined,
+    state          :: state() | undefined,
     item_producer :: item_producer(A, ErrorInfo),
     subscribers    :: list(subscriber:t(A, ErrorInfo))
 }.
@@ -57,9 +57,9 @@ bind(ObservableA, Operator) ->
     apply(Operator, [ObservableA#observable.item_producer]).
 
 %%--------------------------------------------------------------------
--spec subscribe(ObservableA, Subscribers) -> ok 
+-spec subscribe(ObservableA, Subscribers) -> any() 
     when ObservableA :: observable:t(A, ErrorInfo),
-         Subscribers  :: subscriber:t(A, ErrorInfo),
+         Subscribers  :: list(subscriber:t(A, ErrorInfo)),
          A :: any(),
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
@@ -104,6 +104,7 @@ from_value(Value) ->
          B :: any(),
          ErrorInfo :: any().
 
+%% TODO fix this observable
 zip2(#observable{item_producer = ItemProducerA} = _ObservableA,
      #observable{item_producer = ItemProducerB} = _ObservableB) ->
     create(
@@ -128,27 +129,27 @@ zip(Observables) ->
         end
     ).
 
-    
--spec apply_zipped_observables(Observables, Result, State) -> observable_item:t(list(), ErrorInfo) when
+%%--------------------------------------------------------------------    
+-spec apply_zipped_observables(Observables, Result, State) -> {observable_item:t(list(), ErrorInfo), state()} when
     Observables :: [observable:t(A, ErrorInfo)],
     Result      :: list(),
     State       :: state(),
     A           :: any(),
     ErrorInfo   :: any().
-
+%%--------------------------------------------------------------------
 apply_zipped_observables([], Result, State) ->
     {{next, Result}, State};
 apply_zipped_observables([Observable | Observables], Result, State) ->
     #observable{item_producer = ItemProducer} = Observable,
     
-     case apply(ItemProducer, State) of
+     case apply(ItemProducer, [State]) of
         {ignore, NewState} -> 
-            MergedNewState = mpas:merge(NewState, State),
+            MergedNewState = maps:merge(State, NewState),
             apply_zipped_observables(Observables, Result, MergedNewState);
         {{next, Item}, NewState} ->
-            MergedNewState = mpas:merge(NewState, State),
+            MergedNewState = maps:merge(State, NewState),
             apply_zipped_observables(Observables, [Item|Result], MergedNewState);
-        {{on_error, ErrorInfo}, NewState} ->
+        {{error, ErrorInfo}, NewState} ->
             {{error, ErrorInfo}, maps:merge(State, NewState)};
         {complete, NewState} ->
             {complete, maps:merge(State, NewState)}
@@ -162,23 +163,21 @@ apply_zipped_observables([Observable | Observables], Result, State) ->
 %%%===================================================================
 
 %%--------------------------------------------------------------------
--spec broadcast_item(CallbackFunName, Args, Subscribers) -> ok when
+-spec broadcast_item(CallbackFunName, Args, Subscribers) -> list() when
     CallbackFunName :: on_next | on_complete | on_error,
-    Args :: list(A),
-    Subscribers :: subscriber:t(A, ErrorInfo),
+    Args :: list(),
+    Subscribers :: list(subscriber:t(A, ErrorInfo)),
     A :: any(),
     ErrorInfo :: any().
 %%--------------------------------------------------------------------
 broadcast_item(CallbackFunName, Args, Subscribers) ->
-    [
-        apply(CallbackFun, Args) 
-        || Subscriber <- Subscribers,
-           CallbackFun <- maps:get(CallbackFunName, Subscriber)
-    ],
-    ok.
+    SubsCallbackFuns = 
+        [subscriber:get_callback_function(CallbackFunName, Subscriber) || Subscriber <- Subscribers],
+
+    [apply(CallbackFun, Args) ||  CallbackFun <- SubsCallbackFuns, CallbackFun /= undefined].
 
 %%--------------------------------------------------------------------
--spec run(ObservableA) -> ok
+-spec run(ObservableA) -> any()
     when ObservableA :: observable:t(A, ErrorInfo),
          A :: any(),
          ErrorInfo :: any().
@@ -187,7 +186,7 @@ run(ObservableA) ->
     run(ObservableA, _State = maps:new()).
 
 %%--------------------------------------------------------------------
--spec run(ObservableA, State) -> ok
+-spec run(ObservableA, State) -> any()
     when ObservableA :: observable:t(A, ErrorInfo),
          State :: map(),
          A :: any(),
@@ -205,5 +204,4 @@ run(#observable{item_producer = ItemProducer, subscribers = Subscribers} = Obser
             broadcast_item(on_complete, [], Subscribers);
         ignore             ->
             run(ObservableA, NewState)
-    end,
-    ok.
+    end.
