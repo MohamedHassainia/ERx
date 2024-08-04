@@ -8,6 +8,7 @@
          zip2/2,
          zip/1,
          bind/2,
+         pipe/2,
          subscribe/2]).
 
 -export_type([t/2,
@@ -72,6 +73,12 @@ subscribe(ObservableA, Subscribers) ->
     when A :: any(),
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
+from_list([]) ->
+    ItemProducer =
+      fun(State) ->
+        {observable_item:complete(), State}
+      end,
+    create(ItemProducer);
 from_list([Head|Tail]) ->
     Ref = erlang:unique_integer(),
     ItemProducer =
@@ -125,7 +132,7 @@ zip2(#observable{item_producer = ItemProducerA} = _ObservableA,
 zip(Observables) ->
     create(
         fun(State) ->
-            apply_zipped_observables(Observables, [], State)
+            apply_zipped_observables(lists:reverse(Observables), [], State)
         end
     ).
 
@@ -154,8 +161,18 @@ apply_zipped_observables([Observable | Observables], Result, State) ->
         {complete, NewState} ->
             {complete, maps:merge(State, NewState)}
     end.
-            
 
+%%--------------------------------------------------------------------
+-spec pipe(Observable, Operators) -> observable:t(A, ErrorInfo) when
+    A :: any(),
+    ErrorInfo :: any(),
+    Observable :: observable:t(any(), ErrorInfo),
+    Operators  :: list(operator:t(any(), ErrorInfo)).
+%%--------------------------------------------------------------------
+pipe(Observable, Operators) ->
+    lists:foldl(fun(OperatorA, ObservableA) -> 
+                    bind(ObservableA, OperatorA)
+                end, Observable, Operators).
 
 
 %%%===================================================================
