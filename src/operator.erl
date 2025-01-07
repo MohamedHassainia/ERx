@@ -9,7 +9,8 @@
          drop_while/1,
          take/1,
          take_while/1,
-         filter/1]).
+         filter/1,
+         fold/2]).  % Add fold to exports
 
 %%%===================================================================
 %%% Includes, defines, types and records
@@ -259,6 +260,31 @@ all(Pred) ->
             end
         end
     ).
+
+%%--------------------------------------------------------------------
+-spec fold(Fun, Initial) -> operator:t(A, ErrorInfo, Acc) when
+    Fun :: fun((A, Acc) -> Acc),
+    A :: any(),
+    Acc :: any(),
+    Initial :: Acc,
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+fold(Fun, Initial) ->
+    Ref = erlang:unique_integer(),
+    ?operator(ItemProducer, State,
+        begin
+            Acc = maps:get(Ref, State, Initial),
+            {Item, NewState} = apply(ItemProducer, [State]),
+            case Item of
+                {next, Value} ->
+                    NewAcc = Fun(Value, Acc),
+                    {observable_item:ignore(), maps:put(Ref, NewAcc, NewState)};
+                complete ->
+                    {observable_item:create(Acc), NewState};
+                _ ->
+                    {Item, NewState}
+            end
+        end).
 
 %%%===================================================================
 %%% Internal functions
