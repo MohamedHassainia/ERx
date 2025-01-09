@@ -9,8 +9,7 @@
          drop_while/1,
          take/1,
          take_while/1,
-         filter/1,
-         fold/2]).  % Add fold to exports
+         filter/1]).
 
 %%%===================================================================
 %%% Includes, defines, types and records
@@ -18,6 +17,7 @@
 -type t(A, ErrorInfo, B) :: fun((observable:item_producer(A, ErrorInfo)) -> observable:t(B, ErrorInfo)).
 
 -define(operator(ItemProducer, State, OpDef),
+        Ref = erlang:unique_integer(),
         fun(ItemProducer) ->
             observable:create(
                 fun(State) ->
@@ -27,16 +27,44 @@
         end
 ).
 
--define(default_operator_behavior(ItemProducer, Value, St, NewSt, NextNewItem, UpdatedNextSt),
-    begin
-        {Item, NewSt} = apply(ItemProducer, [St]),
-        {
-            observable_item:bind(Item, fun(Value) -> NextNewItem end),,
-            UpdatedNextSt
-        }
-    end
+-define(stateful_operator(ItemProducer, Ref, State, DefaultState, StateHandling1, StateHandling2),
+        Ref = erlang:unique_integer(),
+        fun(ItemProducer) ->
+            observable:create(
+                fun(State) ->
+                    case maps:get(Ref, State, DefaultState) of
+                      StateHandling1;
+                      StateHandling2
+                    end
+                end
+            )
+        end
 ).
 
+-define(state_handling(State, StateHandling), State -> StateHandling).
+
+-define(default_operator(Handler),
+        Ref = erlang:unique_integer(),
+        fun(ItemProducer) ->
+            observable:create(
+                fun(BaseState) ->
+                    {ProducedItem, ProducedState} = apply(ItemProducer, [BaseState]),
+                    Handler(ProducedItem, BaseState, ProducedState, Ref)
+                end
+            )
+        end
+).
+
+-define(stateless_operator(Handler),
+        fun(ItemProducer) ->
+            observable:create(
+                fun(BaseState) ->
+                    {ProducedItem, ProducedState} = apply(ItemProducer, [BaseState]),
+                    {Handler(ProducedItem), ProducedState}
+                end
+            )
+        end
+).
 
 
 %%%===================================================================
@@ -52,14 +80,11 @@
     B :: any().
 %%--------------------------------------------------------------------
 map(MapFun) ->
-    fun(ItemProducer) ->
-        observable:create(
-            fun(State) -> 
-                {Item, NewState} = apply(ItemProducer, [State]),
-                {observable_item:liftM(MapFun, Item), NewState}
-            end
-        )
-    end.
+    ?stateless_operator(
+        fun(Item) ->
+            observable_item:liftM(MapFun, Item)
+        end
+    ).
 
 %%--------------------------------------------------------------------
 -spec filter(Pred) -> operator:t(A, ErrorInfo, A)
@@ -68,19 +93,15 @@ map(MapFun) ->
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
 filter(Pred) ->
-    ?operator(ItemProducer, State,
-        begin
-            {Item, NewState} = apply(ItemProducer, [State]),
-            {
-                observable_item:bind(Item, fun(Value) ->
-                                             case Pred(Value) of
-                                                true -> observable_item:create(Value);
-                                                false -> observable_item:ignore()
-                                             end
-                                           end),
-                NewState
-            }
-        end).
+    ?stateless_operator(
+        fun({next, Value}) ->
+              case Pred(Value) of
+                true -> observable_item:create(Value);
+                false -> observable_item:ignore()
+              end;
+           (Item) -> Item   
+        end
+    ).
 
 %%--------------------------------------------------------------------
 -spec take(N :: integer()) -> operator:t(A, ErrorInfo, A)
@@ -106,7 +127,7 @@ filter(Pred) ->
 %             end
 %         end).
 take(N) when N >= 0 ->
-    Ref = erlang:unique_integer(),
+    % Ref = erlang:unique_integer(),
     ?operator(ItemProducer, St,
         begin
             State = add_new_state_field(Ref, N, St),
@@ -146,33 +167,84 @@ take_while(Pred) ->
             }
         end).
 
+% %%--------------------------------------------------------------------
+% -spec any(Pred) -> observable_item:t(A, ErrorInfo)
+%     when
+%         Pred :: fun((A) -> boolean()),
+%         A    :: any(),
+%         ErrorInfo :: any().
+% %%--------------------------------------------------------------------
+% any(Pred) ->
+%     Ref = erlang:unique_integer(),
+%     ?operator(ItemProducer, State,
+%         begin
+%             case maps:get(Ref, State, uncompleted) of
+%                 completed ->
+%                     {observable_item:complete(), State};
+%                 uncompleted ->
+%                     {Item, NewState} = apply(ItemProducer, [State]),
+%                     case Item of
+%                         complete ->
+%                             {observable_item:create(false), maps:put(Ref, completed, NewState)};
+%                         {next, Value} ->
+%                             case Pred(Value) of
+%                                 true  -> {observable_item:create(true), maps:put(Ref, completed, NewState)};
+%                                 false -> {observable_item:ignore(), maps:put(Ref, uncompleted, NewState)}
+%                             end;
+%                         Item ->
+%                             {Item, NewState}
+%                     end
+%             end
+%         end
+%     ).
+any(Pred) ->
+    ?stateful_operator(ItemProducer, Ref, State, _DefaultState = uncompleted,
+        ?state_handling(
+            _State = completed,
+            {observable_item:complete(), State}
+        ),
+        ?state_handling(
+            _State = uncompleted,
+            begin
+                {Item, NewState} = apply(ItemProducer, [State]),
+                case Item of
+                    complete ->
+                        {observable_item:create(false), maps:put(Ref, completed, NewState)};
+                    {next, Value} ->
+                        case Pred(Value) of
+                            true  -> {observable_item:create(true), maps:put(Ref, completed, NewState)};
+                            false -> {observable_item:ignore(), maps:put(Ref, uncompleted, NewState)}
+                        end;
+                    Item ->
+                        {Item, NewState}
+                end
+            end
+        )
+    ).
+
 %%--------------------------------------------------------------------
--spec any(Pred) -> observable_item:t(A, ErrorInfo)
+-spec all(Pred) -> observable_item:t(A, ErrorInfo)
     when
         Pred :: fun((A) -> boolean()),
         A    :: any(),
         ErrorInfo :: any().
 %%--------------------------------------------------------------------
-any(Pred) ->
-    Ref = erlang:unique_integer(),
-    ?operator(ItemProducer, State,
-        begin
-            case maps:get(Ref, State, uncompleted) of
-                completed ->
-                    {observable_item:complete(), State};
-                uncompleted ->
-                    {Item, NewState} = apply(ItemProducer, [State]),
-                    case Item of
-                        complete ->
-                            {observable_item:create(false), maps:put(Ref, completed, NewState)};
-                        {next, Value} ->
-                            case Pred(Value) of
-                                true  -> {observable_item:create(true), maps:put(Ref, completed, NewState)};
-                                false -> {observable_item:ignore(), maps:put(Ref, uncompleted, NewState)}
-                            end;
-                        Item ->
-                            {Item, NewState}
-                    end
+all(Pred) ->
+    ?default_operator(
+        fun(Item, State, NewState, StRef) ->
+            CurrentState = maps:get(StRef, State, uncompleted),
+            case {CurrentState, Item} of
+                {completed, _} ->
+                    {observable_item:complete(), NewState};
+                {uncompleted, complete} ->
+                    {observable_item:create(true), maps:put(StRef, completed, NewState)};
+                {uncompleted, {next, Value}} ->
+                    case Pred(Value) of
+                        true -> {observable_item:ignore(), maps:put(StRef, uncompleted, NewState)};
+                        false -> {observable_item:create(false), maps:put(StRef, completed, NewState)}
+                    end;
+                {uncompleted, _} ->
+                    {Item, NewState}
             end
         end
     ).
@@ -202,22 +274,28 @@ any(Pred) ->
 -spec drop(N :: non_neg_integer()) -> operator:t(any(), any(), any()).
 %%--------------------------------------------------------------------
 drop(N) ->
-    Ref = erlang:unique_integer(),
-    ?operator(ItemProducer, State, 
-        begin
-            NItemLeftToDrop = maps:get(Ref, State, N),
-            {Item, NewState} = apply(ItemProducer, [State]),
+    ?default_operator(
+        fun(Item, State, NewState, StRef) ->
+            NItemLeftToDrop = maps:get(StRef, State, N),
             case Item of
                 {next, _Value} when NItemLeftToDrop > 0 ->
-                    {observable_item:ignore(), maps:put(Ref, NItemLeftToDrop - 1, NewState)};
+                    {observable_item:ignore(), maps:put(StRef, NItemLeftToDrop - 1, NewState)};
                 Item ->
-                    {Item, maps:put(Ref, NItemLeftToDrop, NewState)}
+                    {Item, maps:put(StRef, NItemLeftToDrop, NewState)}
             end
-        end).
+        end
+    ).
 
+%%--------------------------------------------------------------------
+-spec drop_while(Pred) -> operator:t(A, ErrorInfo, A)
+    when
+        Pred :: fun((A) -> boolean()),
+        A    :: any(),
+        ErrorInfo :: any().
+%%--------------------------------------------------------------------
 drop_while(Pred) ->
     %% double check Haskell's take_while
-    Ref = erlang:unique_integer(),
+    % Ref = erlang:unique_integer(),
     ?operator(ItemProducer, State,
         begin
             MustDrop = maps:get(Ref, State, true),
@@ -227,62 +305,6 @@ drop_while(Pred) ->
                     {Item, NewState};
                 true ->
                     drop_item(Item, Pred, NewState, Ref)
-            end
-        end).
-
-%%--------------------------------------------------------------------
--spec all(Pred) -> observable_item:t(A, ErrorInfo)
-    when
-        Pred :: fun((A) -> boolean()),
-        A    :: any(),
-        ErrorInfo :: any().
-%%--------------------------------------------------------------------
-all(Pred) ->
-    Ref = erlang:unique_integer(),
-    ?operator(ItemProducer, State,
-        begin
-            case maps:get(Ref, State, uncompleted) of
-                completed ->
-                    {observable_item:complete(), State};
-                uncompleted ->
-                    {Item, NewState} = apply(ItemProducer, [State]),
-                    case Item of
-                        complete ->
-                            {observable_item:create(true), maps:put(Ref, completed, NewState)};
-                        {next, Value} ->
-                            case Pred(Value) of
-                                true  -> {observable_item:ignore(), maps:put(Ref, uncompleted, NewState)};
-                                false -> {observable_item:create(false), maps:put(Ref, completed, NewState)}
-                            end;
-                        Item ->
-                            {Item, NewState}
-                    end
-            end
-        end
-    ).
-
-%%--------------------------------------------------------------------
--spec fold(Fun, Initial) -> operator:t(A, ErrorInfo, Acc) when
-    Fun :: fun((A, Acc) -> Acc),
-    A :: any(),
-    Acc :: any(),
-    Initial :: Acc,
-    ErrorInfo :: any().
-%%--------------------------------------------------------------------
-fold(Fun, Initial) ->
-    Ref = erlang:unique_integer(),
-    ?operator(ItemProducer, State,
-        begin
-            Acc = maps:get(Ref, State, Initial),
-            {Item, NewState} = apply(ItemProducer, [State]),
-            case Item of
-                {next, Value} ->
-                    NewAcc = Fun(Value, Acc),
-                    {observable_item:ignore(), maps:put(Ref, NewAcc, NewState)};
-                complete ->
-                    {observable_item:create(Acc), NewState};
-                _ ->
-                    {Item, NewState}
             end
         end).
 
