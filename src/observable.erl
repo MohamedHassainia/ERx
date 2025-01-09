@@ -12,18 +12,19 @@
          subscribe/2]).
 
 -export_type([t/2,
+              state/0,
               item_producer/2]).
 
 %%%===================================================================
 %%% Includes, defines, types and records
 %%%===================================================================
--type state() :: map().
+-type state() :: #{is_completed => boolean()}.
 -type item_producer(A, E) :: fun((state()) -> {observable_item:t(A, E), state()}).
 
 -record(observable, {
-    state            :: undefined | state(),
-    item_producer    :: item_producer(any(), any()),
-    subscribers = [] :: list(subscriber:t(any(), any()))
+    state = #{is_completed => false} :: state(),
+    item_producer                    :: item_producer(any(), any()),
+    subscribers = []                 :: list(subscriber:t(any(), any()))
 }).
 
 -type t(A, ErrorInfo) :: #observable{
@@ -31,6 +32,46 @@
     item_producer :: item_producer(A, ErrorInfo),
     subscribers    :: list(subscriber:t(A, ErrorInfo))
 }.
+
+-define(observable(State, StRef, ObDef),
+    Ref = erlang:unique_integer(),
+    ItemProducer =
+        fun(State) ->
+            case maps:get(is_completed, State) of 
+                true ->
+                    {observable_item:complete(), State};
+                false ->
+                    ObDef 
+            end
+        end,
+    #observable{item_producer = ItemProducer}
+).
+
+-define(observable(State, ObDef),
+    ItemProducer =
+        fun(State) ->
+            case maps:get(is_completed, State) of 
+                true ->
+                    {observable_item:complete(), State};
+                false ->
+                    ObDef 
+            end
+        end,
+    #observable{item_producer = ItemProducer}
+).
+
+-define(stateless_observable(ObDef),
+    ItemProducer =
+        fun(State) ->
+            case maps:get(is_completed, State) of 
+                true ->
+                    {observable_item:complete(), State};
+                false ->
+                    {ObDef, State} 
+            end
+        end,
+    #observable{item_producer = ItemProducer}
+).
 
 %%%===================================================================
 %%% API
@@ -74,16 +115,11 @@ subscribe(ObservableA, Subscribers) ->
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
 from_list([]) ->
-    ItemProducer =
-      fun(State) ->
-        {observable_item:complete(), State}
-      end,
-    create(ItemProducer);
+    ?stateless_observable(observable_item:complete());
 from_list([Head|Tail]) ->
-    Ref = erlang:unique_integer(),
-    ItemProducer =
-     fun(State) ->
-             case maps:get(Ref, State, undefined) of
+    ?observable(State, Ref,
+        begin
+            case maps:get(Ref, State, undefined) of
                 undefined ->
                     {observable_item:create(Head), _State = maps:put(Ref, Tail, State)};
                 [] -> 
@@ -91,8 +127,8 @@ from_list([Head|Tail]) ->
                 [Value|List] ->
                     {observable_item:create(Value), _State = maps:put(Ref, List, State)}
              end
-     end,
-    create(ItemProducer).
+        end
+    ).
 
 %%--------------------------------------------------------------------
 -spec from_value(Value :: A) -> observable:t(A, ErrorInfo)
@@ -100,8 +136,7 @@ from_list([Head|Tail]) ->
           ErrorInfo :: any().
 %%--------------------------------------------------------------------
 from_value(Value) ->
-    ItemProducer = fun(State) -> {observable_item:create(Value), State} end,
-    create(ItemProducer).
+    ?stateless_observable(observable_item:create(Value)).
     
 -spec zip2(ObservableA, ObservableB) -> ObservableC
     when ObservableA :: observable:t(A, ErrorInfo),
@@ -114,8 +149,8 @@ from_value(Value) ->
 %% TODO fix this observable
 zip2(#observable{item_producer = ItemProducerA} = _ObservableA,
      #observable{item_producer = ItemProducerB} = _ObservableB) ->
-    create(
-        fun(State) ->
+    ?observable(State,
+        begin
             {ItemA, NewStateA} = apply(ItemProducerA, [State]),
             {ItemB, NewStateB} = apply(ItemProducerB, [State]),
             NewState = maps:merge(NewStateA, NewStateB),
@@ -130,32 +165,30 @@ zip2(#observable{item_producer = ItemProducerA} = _ObservableA,
          ErrorInfo :: any().
 
 zip(Observables) ->
-    create(
-        fun(State) ->
-            apply_zipped_observables(lists:reverse(Observables), [], State)
-        end
+    ?observable(State,
+            apply_observables_and_zip_items(lists:reverse(Observables), [], State)
     ).
 
 %%--------------------------------------------------------------------    
--spec apply_zipped_observables(Observables, Result, State) -> {observable_item:t(list(), ErrorInfo), state()} when
+-spec apply_observables_and_zip_items(Observables, Result, State) -> {observable_item:t(list(), ErrorInfo), state()} when
     Observables :: [observable:t(A, ErrorInfo)],
     Result      :: list(),
     State       :: state(),
     A           :: any(),
     ErrorInfo   :: any().
 %%--------------------------------------------------------------------
-apply_zipped_observables([], Result, State) ->
+apply_observables_and_zip_items([], Result, State) ->
     {{next, Result}, State};
-apply_zipped_observables([Observable | Observables], Result, State) ->
+apply_observables_and_zip_items([Observable | Observables], Result, State) ->
     #observable{item_producer = ItemProducer} = Observable,
     
      case apply(ItemProducer, [State]) of
         {ignore, NewState} -> 
             MergedNewState = maps:merge(State, NewState),
-            apply_zipped_observables(Observables, Result, MergedNewState);
+            apply_observables_and_zip_items(Observables, Result, MergedNewState);
         {{next, Item}, NewState} ->
             MergedNewState = maps:merge(State, NewState),
-            apply_zipped_observables(Observables, [Item|Result], MergedNewState);
+            apply_observables_and_zip_items(Observables, [Item|Result], MergedNewState);
         {{error, ErrorInfo}, NewState} ->
             {{error, ErrorInfo}, maps:merge(State, NewState)};
         {complete, NewState} ->
@@ -199,8 +232,8 @@ broadcast_item(CallbackFunName, Args, Subscribers) ->
          A :: any(),
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
-run(ObservableA) ->
-    run(ObservableA, _State = maps:new()).
+run(#observable{state = State} = ObservableA) ->
+    run(ObservableA, State).
 
 %%--------------------------------------------------------------------
 -spec run(ObservableA, State) -> any()
@@ -209,6 +242,8 @@ run(ObservableA) ->
          A :: any(),
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
+run(#observable{subscribers = Subscribers}, #{is_completed := true}) ->
+    broadcast_item(on_complete, [], Subscribers);
 run(#observable{item_producer = ItemProducer, subscribers = Subscribers} = ObservableA, State) ->
     {Item, NewState} = apply(ItemProducer, [State]),
     case Item of 

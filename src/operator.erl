@@ -198,29 +198,41 @@ take_while(Pred) ->
 %         end
 %     ).
 any(Pred) ->
-    ?stateful_operator(ItemProducer, Ref, State, _DefaultState = uncompleted,
-        ?state_handling(
-            _State = completed,
-            {observable_item:complete(), State}
-        ),
-        ?state_handling(
-            _State = uncompleted,
-            begin
-                {Item, NewState} = apply(ItemProducer, [State]),
-                case Item of
-                    complete ->
-                        {observable_item:create(false), maps:put(Ref, completed, NewState)};
-                    {next, Value} ->
-                        case Pred(Value) of
-                            true  -> {observable_item:create(true), maps:put(Ref, completed, NewState)};
-                            false -> {observable_item:ignore(), maps:put(Ref, uncompleted, NewState)}
-                        end;
-                    Item ->
-                        {Item, NewState}
-                end
-            end
-        )
+    ?default_operator(
+        fun({next, Value}, _State, NewState, _StRef) ->
+             case Pred(Value) of
+                true  -> {observable_item:create(true), mark_observable_as_completed(NewState)};
+                false -> {observable_item:ignore(), NewState}
+             end;
+           (complete, _State, NewState, _StRef) ->
+                {observable_item:create(false), mark_observable_as_completed(NewState)};
+           (Item, _State, NewState, _StRef) ->
+                {Item, NewState}
+       end
     ).
+    % ?stateful_operator(ItemProducer, Ref, State, _DefaultState = uncompleted,
+    %     ?state_handling(
+    %         _State = completed,
+    %         {observable_item:complete(), State}
+    %     ),
+    %     ?state_handling(
+    %         _State = uncompleted,
+    %         begin
+    %             {Item, NewState} = apply(ItemProducer, [State]),
+    %             case Item of
+    %                 complete ->
+    %                     {observable_item:create(false), maps:put(Ref, completed, NewState)};
+    %                 {next, Value} ->
+    %                     case Pred(Value) of
+    %                         true  -> {observable_item:create(true), maps:put(Ref, completed, NewState)};
+    %                         false -> {observable_item:ignore(), maps:put(Ref, uncompleted, NewState)}
+    %                     end;
+    %                 Item ->
+    %                     {Item, NewState}
+    %             end
+    %         end
+    %     )
+    % ).
 
 %%--------------------------------------------------------------------
 -spec all(Pred) -> observable_item:t(A, ErrorInfo)
@@ -231,21 +243,15 @@ any(Pred) ->
 %%--------------------------------------------------------------------
 all(Pred) ->
     ?default_operator(
-        fun(Item, State, NewState, StRef) ->
-            CurrentState = maps:get(StRef, State, uncompleted),
-            case {CurrentState, Item} of
-                {completed, _} ->
-                    {observable_item:complete(), NewState};
-                {uncompleted, complete} ->
-                    {observable_item:create(true), maps:put(StRef, completed, NewState)};
-                {uncompleted, {next, Value}} ->
-                    case Pred(Value) of
-                        true -> {observable_item:ignore(), maps:put(StRef, uncompleted, NewState)};
-                        false -> {observable_item:create(false), maps:put(StRef, completed, NewState)}
-                    end;
-                {uncompleted, _} ->
-                    {Item, NewState}
-            end
+        fun({next, Value}, _State, NewState, _StRef) ->
+              case Pred(Value) of
+                true  -> {observable_item:ignore(), NewState};
+                false -> {observable_item:create(false), mark_observable_as_completed(NewState)}
+              end;
+           (complete, _State, NewState, _StRef) ->
+                {observable_item:create(true), mark_observable_as_completed(NewState)};
+           (Item, _State, NewState, _StRef) ->
+                {Item, NewState}
         end
     ).
 
@@ -326,6 +332,21 @@ add_new_state_field(Key, Value, State) ->
             State
     end.
 
+%%--------------------------------------------------------------------
+-spec mark_observable_as_completed(State :: observable:state()) -> map().
+%%--------------------------------------------------------------------
+mark_observable_as_completed(State) ->
+    maps:put(is_completed, true, State).
+
+%%--------------------------------------------------------------------
+-spec drop_item(Item, MustDropPred, State, MustDropRef) -> {observable_item:t(A, ErrorInfo), map()} when
+    Item :: observable_item:t(A, ErrorInfo),
+    A :: any(),
+    ErrorInfo :: any(),
+    MustDropPred :: fun((A) -> boolean()),
+    State :: map(),
+    MustDropRef :: any().
+%%--------------------------------------------------------------------
 drop_item({next, Value} = Item, MustDropPred, State, MustDropRef) ->
     case MustDropPred(Value) of
         true ->
