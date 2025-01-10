@@ -35,41 +35,17 @@
 
 -define(observable(State, StRef, ObDef),
     Ref = erlang:unique_integer(),
-    ItemProducer =
-        fun(State) ->
-            case maps:get(is_completed, State) of 
-                true ->
-                    {observable_item:complete(), State};
-                false ->
-                    ObDef 
-            end
-        end,
+    ItemProducer = fun(State) -> ObDef end,
     #observable{item_producer = ItemProducer}
 ).
 
 -define(observable(State, ObDef),
-    ItemProducer =
-        fun(State) ->
-            case maps:get(is_completed, State) of 
-                true ->
-                    {observable_item:complete(), State};
-                false ->
-                    ObDef 
-            end
-        end,
+    ItemProducer = fun(State) -> ObDef end,
     #observable{item_producer = ItemProducer}
 ).
 
 -define(stateless_observable(ObDef),
-    ItemProducer =
-        fun(State) ->
-            case maps:get(is_completed, State) of 
-                true ->
-                    {observable_item:complete(), State};
-                false ->
-                    {ObDef, State} 
-            end
-        end,
+    ItemProducer = fun(State) -> {ObDef, State} end,
     #observable{item_producer = ItemProducer}
 ).
 

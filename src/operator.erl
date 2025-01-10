@@ -210,29 +210,6 @@ any(Pred) ->
                 {Item, NewState}
        end
     ).
-    % ?stateful_operator(ItemProducer, Ref, State, _DefaultState = uncompleted,
-    %     ?state_handling(
-    %         _State = completed,
-    %         {observable_item:complete(), State}
-    %     ),
-    %     ?state_handling(
-    %         _State = uncompleted,
-    %         begin
-    %             {Item, NewState} = apply(ItemProducer, [State]),
-    %             case Item of
-    %                 complete ->
-    %                     {observable_item:create(false), maps:put(Ref, completed, NewState)};
-    %                 {next, Value} ->
-    %                     case Pred(Value) of
-    %                         true  -> {observable_item:create(true), maps:put(Ref, completed, NewState)};
-    %                         false -> {observable_item:ignore(), maps:put(Ref, uncompleted, NewState)}
-    %                     end;
-    %                 Item ->
-    %                     {Item, NewState}
-    %             end
-    %         end
-    %     )
-    % ).
 
 %%--------------------------------------------------------------------
 -spec all(Pred) -> observable_item:t(A, ErrorInfo)
@@ -254,27 +231,6 @@ all(Pred) ->
                 {Item, NewState}
         end
     ).
-
-% drop(N) ->
-%     Ref = erlang:unique_integer(),
-%     ?operator(ItemProducer, State, 
-%         begin
-%             NItemLeftToDrop = maps:get(Ref, State, N),
-%             ?default_operator_behavior(ItemProducer, Item, State, NewState,
-%                 case NItemLeftToDrop > 0 of
-%                     true ->
-%                         observable_item:ignore();
-%                     false ->
-%                         Item
-%                 end,
-%                 case observable_item:is_a_next_item(Item) of
-%                     true ->
-%                         maps:put(Ref, NItemLeftToDrop - 1, NewState);
-%                     false ->
-%                         maps:put(Ref, NItemLeftToDrop, NewState)
-%                 end
-%             )
-%         end).
 
 %%--------------------------------------------------------------------
 -spec drop(N :: non_neg_integer()) -> operator:t(any(), any(), any()).
