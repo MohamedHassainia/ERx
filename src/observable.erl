@@ -18,6 +18,8 @@
 %%%===================================================================
 %%% Includes, defines, types and records
 %%%===================================================================
+-include("observable_item.hrl").
+
 -type state() :: #{is_completed => boolean()}.
 -type item_producer(A, E) :: fun((state()) -> {observable_item:t(A, E), state()}).
 

@@ -128,22 +128,32 @@ filter(Pred) ->
 %         end).
 take(N) when N >= 0 ->
     % Ref = erlang:unique_integer(),
-    ?operator(ItemProducer, St,
-        begin
-            State = add_new_state_field(Ref, N, St),
-            case maps:get(Ref, State, undefined) of
-                0 -> 
-                    {complete, State};
-                NItem -> % TDOO add condition N is bigger or equal to zero
-                    {Item, NewState} = apply(ItemProducer, [State]),
-                    case observable_item:is_a_next_item(Item) of
-                        true ->
-                            {Item, maps:put(Ref, NItem - 1, NewState)};
-                        false ->
-                            {Item, NewState}
-                    end
-            end
-        end).
+    ?default_operator(
+        fun({next, Value}, State, NewState, StRef) ->
+            NItemLeftToTake = maps:get(StRef, State, N),
+            case NItemLeftToTake of
+                0 -> {observable_item:complete(), NewState};
+                _ -> {observable_item:create(Value), maps:put(StRef, NItemLeftToTake - 1, NewState)}
+            end;
+           (Item, _State, NewState, _StRef) -> {Item, NewState}
+        end
+    ).
+    % ?operator(ItemProducer, St,
+    %     begin
+    %         State = add_new_state_field(Ref, N, St),
+    %         case maps:get(Ref, State, undefined) of
+    %             0 -> 
+    %                 {complete, State};
+    %             NItem -> % TDOO add condition N is bigger or equal to zero
+    %                 {Item, NewState} = apply(ItemProducer, [State]),
+    %                 case observable_item:is_a_next_item(Item) of
+    %                     true ->
+    %                         {Item, maps:put(Ref, NItem - 1, NewState)};
+    %                     false ->
+    %                         {Item, NewState}
+    %                 end
+    %         end
+    %     end).
 
 %%--------------------------------------------------------------------
 -spec take_while(Pred) -> operator:t(A, ErrorInfo, A) when
@@ -152,51 +162,21 @@ take(N) when N >= 0 ->
     ErrorInfo :: any().
 %%--------------------------------------------------------------------
 take_while(Pred) ->
-    %% double check Haskell's take_while
-    ?operator(ItemProducer, State,
-        begin
-            {Item, NewState} = apply(ItemProducer, [State]),
-            {
-                observable_item:bind(Item, fun(Value) ->
-                                             case Pred(Value) of
-                                                true  -> observable_item:create(Value);
-                                                false -> observable_item:complete()
-                                             end
-                                           end),
-                NewState
-            }
-        end).
+    ?default_operator(
+        fun({next, Value}, _State, NewState, _StRef) ->
+            case Pred(Value) of
+                true  -> {observable_item:create(Value), NewState};
+                false -> {observable_item:complete(), NewState}
+            end;
+           (Item, _State, NewState, _StRef) -> {Item, NewState}
+        end
+    ).
 
-% %%--------------------------------------------------------------------
-% -spec any(Pred) -> observable_item:t(A, ErrorInfo)
-%     when
-%         Pred :: fun((A) -> boolean()),
-%         A    :: any(),
-%         ErrorInfo :: any().
-% %%--------------------------------------------------------------------
-% any(Pred) ->
-%     Ref = erlang:unique_integer(),
-%     ?operator(ItemProducer, State,
-%         begin
-%             case maps:get(Ref, State, uncompleted) of
-%                 completed ->
-%                     {observable_item:complete(), State};
-%                 uncompleted ->
-%                     {Item, NewState} = apply(ItemProducer, [State]),
-%                     case Item of
-%                         complete ->
-%                             {observable_item:create(false), maps:put(Ref, completed, NewState)};
-%                         {next, Value} ->
-%                             case Pred(Value) of
-%                                 true  -> {observable_item:create(true), maps:put(Ref, completed, NewState)};
-%                                 false -> {observable_item:ignore(), maps:put(Ref, uncompleted, NewState)}
-%                             end;
-%                         Item ->
-%                             {Item, NewState}
-%                     end
-%             end
-%         end
-%     ).
+%%--------------------------------------------------------------------
+-spec any(Pred :: fun((A) -> boolean())) -> operator:t(A, ErrorInfo, boolean()) when
+    A :: any(),
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
 any(Pred) ->
     ?default_operator(
         fun({next, Value}, _State, NewState, _StRef) ->
@@ -204,8 +184,10 @@ any(Pred) ->
                 true  -> {observable_item:create(true), mark_observable_as_completed(NewState)};
                 false -> {observable_item:ignore(), NewState}
              end;
+
            (complete, _State, NewState, _StRef) ->
                 {observable_item:create(false), mark_observable_as_completed(NewState)};
+            
            (Item, _State, NewState, _StRef) ->
                 {Item, NewState}
        end
@@ -257,7 +239,6 @@ drop(N) ->
 %%--------------------------------------------------------------------
 drop_while(Pred) ->
     %% double check Haskell's take_while
-    % Ref = erlang:unique_integer(),
     ?operator(ItemProducer, State,
         begin
             MustDrop = maps:get(Ref, State, true),
@@ -274,19 +255,19 @@ drop_while(Pred) ->
 %%% Internal functions
 %%%===================================================================
 
-%%--------------------------------------------------------------------
--spec add_new_state_field(Key, Value, State) -> map() when
-    Key :: any(),
-    Value :: any(),
-    State :: map().
-%%--------------------------------------------------------------------
-add_new_state_field(Key, Value, State) ->
-    case maps:get(Key, State, undefined) of
-        undefined ->
-            maps:put(Key, Value, State);
-        _ ->
-            State
-    end.
+% %%--------------------------------------------------------------------
+% -spec add_new_state_field(Key, Value, State) -> map() when
+%     Key :: any(),
+%     Value :: any(),
+%     State :: map().
+% %%--------------------------------------------------------------------
+% add_new_state_field(Key, Value, State) ->
+%     case maps:get(Key, State, undefined) of
+%         undefined ->
+%             maps:put(Key, Value, State);
+%         _ ->
+%             State
+%     end.
 
 %%--------------------------------------------------------------------
 -spec mark_observable_as_completed(State :: observable:state()) -> map().
