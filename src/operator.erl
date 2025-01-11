@@ -96,10 +96,10 @@ map(MapFun) ->
 %%--------------------------------------------------------------------
 filter(Pred) ->
     ?stateless_operator(
-        fun({next, Value}) ->
+        fun(?NEXT(Value)) ->
               case Pred(Value) of
-                true -> observable_item:create(Value);
-                false -> observable_item:ignore()
+                true -> ?NEXT(Value);
+                false -> ?IGNORE
               end;
            (Item) -> Item   
         end
@@ -117,7 +117,7 @@ filter(Pred) ->
 %             State = add_new_state_field(Ref, N, St),
 %             case maps:get(Ref, State, undefined) of
 %                 0 -> 
-%                     {complete, State};
+%                     {?COMPLETE, State};
 %                 NItem -> % TDOO add condition N is bigger or equal to zero
 %                     {Item, NewState} = apply(ItemProducer, [State]),
 %                     case observable_item:is_a_next_item(Item) of
@@ -131,11 +131,11 @@ filter(Pred) ->
 take(N) when N >= 0 ->
     % Ref = erlang:unique_integer(),
     ?default_operator(
-        fun({next, Value}, State, NewState, StRef) ->
+        fun(?NEXT(Value), State, NewState, StRef) ->
             NItemLeftToTake = maps:get(StRef, State, N),
             case NItemLeftToTake of
-                0 -> {observable_item:complete(), NewState};
-                _ -> {observable_item:create(Value), maps:put(StRef, NItemLeftToTake - 1, NewState)}
+                0 -> {?COMPLETE, NewState};
+                _ -> {?NEXT(Value), maps:put(StRef, NItemLeftToTake - 1, NewState)}
             end;
            (Item, _State, NewState, _StRef) -> {Item, NewState}
         end
@@ -145,7 +145,7 @@ take(N) when N >= 0 ->
     %         State = add_new_state_field(Ref, N, St),
     %         case maps:get(Ref, State, undefined) of
     %             0 -> 
-    %                 {complete, State};
+    %                 {?COMPLETE, State};
     %             NItem -> % TDOO add condition N is bigger or equal to zero
     %                 {Item, NewState} = apply(ItemProducer, [State]),
     %                 case observable_item:is_a_next_item(Item) of
@@ -165,10 +165,10 @@ take(N) when N >= 0 ->
 %%--------------------------------------------------------------------
 take_while(Pred) ->
     ?default_operator(
-        fun({next, Value}, _State, NewState, _StRef) ->
+        fun(?NEXT(Value), _State, NewState, _StRef) ->
             case Pred(Value) of
-                true  -> {observable_item:create(Value), NewState};
-                false -> {observable_item:complete(), NewState}
+                true  -> {?NEXT(Value), NewState};
+                false -> {?COMPLETE, NewState}
             end;
            (Item, _State, NewState, _StRef) -> {Item, NewState}
         end
@@ -181,14 +181,14 @@ take_while(Pred) ->
 %%--------------------------------------------------------------------
 any(Pred) ->
     ?default_operator(
-        fun({next, Value}, _State, NewState, _StRef) ->
+        fun(?NEXT(Value), _State, NewState, _StRef) ->
              case Pred(Value) of
-                true  -> {observable_item:create(true), mark_observable_as_completed(NewState)};
-                false -> {observable_item:ignore(), NewState}
+                true  -> {?NEXT(true), mark_observable_as_completed(NewState)};
+                false -> {?IGNORE, NewState}
              end;
 
-           (complete, _State, NewState, _StRef) ->
-                {observable_item:create(false), mark_observable_as_completed(NewState)};
+           (?COMPLETE, _State, NewState, _StRef) ->
+                {?NEXT(false), mark_observable_as_completed(NewState)};
             
            (Item, _State, NewState, _StRef) ->
                 {Item, NewState}
@@ -204,13 +204,13 @@ any(Pred) ->
 %%--------------------------------------------------------------------
 all(Pred) ->
     ?default_operator(
-        fun({next, Value}, _State, NewState, _StRef) ->
+        fun(?NEXT(Value), _State, NewState, _StRef) ->
               case Pred(Value) of
-                true  -> {observable_item:ignore(), NewState};
-                false -> {observable_item:create(false), mark_observable_as_completed(NewState)}
+                true  -> {?IGNORE, NewState};
+                false -> {?NEXT(false), mark_observable_as_completed(NewState)}
               end;
-           (complete, _State, NewState, _StRef) ->
-                {observable_item:create(true), mark_observable_as_completed(NewState)};
+           (?COMPLETE, _State, NewState, _StRef) ->
+                {?NEXT(true), mark_observable_as_completed(NewState)};
            (Item, _State, NewState, _StRef) ->
                 {Item, NewState}
         end
@@ -224,8 +224,8 @@ drop(N) ->
         fun(Item, State, NewState, StRef) ->
             NItemLeftToDrop = maps:get(StRef, State, N),
             case Item of
-                {next, _Value} when NItemLeftToDrop > 0 ->
-                    {observable_item:ignore(), maps:put(StRef, NItemLeftToDrop - 1, NewState)};
+                ?NEXT(_Value) when NItemLeftToDrop > 0 ->
+                    {?IGNORE, maps:put(StRef, NItemLeftToDrop - 1, NewState)};
                 Item ->
                     {Item, maps:put(StRef, NItemLeftToDrop, NewState)}
             end
@@ -286,10 +286,10 @@ mark_observable_as_completed(State) ->
     State :: map(),
     MustDropRef :: any().
 %%--------------------------------------------------------------------
-drop_item({next, Value} = Item, MustDropPred, State, MustDropRef) ->
+drop_item(?NEXT(Value) = Item, MustDropPred, State, MustDropRef) ->
     case MustDropPred(Value) of
         true ->
-            {observable_item:ignore(), maps:put(MustDropRef,  true, State)};
+            {?IGNORE, maps:put(MustDropRef,  true, State)};
         false ->
             {Item, maps:put(MustDropRef, false, State)}
     end;
