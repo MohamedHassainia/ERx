@@ -19,6 +19,7 @@
 %%% Includes, defines, types and records
 %%%===================================================================
 -include("observable_item.hrl").
+-include("subscriber.hrl").
 
 -type state() :: #{is_completed => boolean()}.
 -type item_producer(A, E) :: fun((state()) -> {observable_item:t(A, E), state()}).
@@ -93,17 +94,17 @@ subscribe(ObservableA, Subscribers) ->
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
 from_list([]) ->
-    ?stateless_observable(observable_item:complete());
+    ?stateless_observable(?COMPLETE);
 from_list([Head|Tail]) ->
     ?observable(State, Ref,
         begin
             case maps:get(Ref, State, undefined) of
                 undefined ->
-                    {observable_item:create(Head), _State = maps:put(Ref, Tail, State)};
+                    {?NEXT(Head), _State = maps:put(Ref, Tail, State)};
                 [] -> 
-                    {observable_item:complete(), State};
+                    {?COMPLETE, State};
                 [Value|List] ->
-                    {observable_item:create(Value), _State = maps:put(Ref, List, State)}
+                    {?NEXT(Value), _State = maps:put(Ref, List, State)}
              end
         end
     ).
@@ -114,7 +115,7 @@ from_list([Head|Tail]) ->
           ErrorInfo :: any().
 %%--------------------------------------------------------------------
 from_value(Value) ->
-    ?stateless_observable(observable_item:create(Value)).
+    ?stateless_observable(?NEXT(Value)).
     
 -spec zip2(ObservableA, ObservableB) -> ObservableC
     when ObservableA :: observable:t(A, ErrorInfo),
@@ -156,21 +157,21 @@ zip(Observables) ->
     ErrorInfo   :: any().
 %%--------------------------------------------------------------------
 apply_observables_and_zip_items([], Result, State) ->
-    {{next, Result}, State};
+    {?NEXT(Result), State};
 apply_observables_and_zip_items([Observable | Observables], Result, State) ->
     #observable{item_producer = ItemProducer} = Observable,
     
      case apply(ItemProducer, [State]) of
-        {ignore, NewState} -> 
+        {?IGNORE, NewState} -> 
             MergedNewState = maps:merge(State, NewState),
             apply_observables_and_zip_items(Observables, Result, MergedNewState);
-        {{next, Item}, NewState} ->
+        {?NEXT(Item), NewState} ->
             MergedNewState = maps:merge(State, NewState),
             apply_observables_and_zip_items(Observables, [Item|Result], MergedNewState);
-        {{error, ErrorInfo}, NewState} ->
-            {{error, ErrorInfo}, maps:merge(State, NewState)};
-        {complete, NewState} ->
-            {complete, maps:merge(State, NewState)}
+        {?ERROR(ErrorInfo), NewState} ->
+            {?ERROR(ErrorInfo), maps:merge(State, NewState)};
+        {?COMPLETE, NewState} ->
+            {?COMPLETE, maps:merge(State, NewState)}
     end.
 
 %%--------------------------------------------------------------------
@@ -221,17 +222,17 @@ run(#observable{state = State} = ObservableA) ->
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
 run(#observable{subscribers = Subscribers}, #{is_completed := true}) ->
-    broadcast_item(on_complete, [], Subscribers);
+    broadcast_item(?ON_COMPLETE, [], Subscribers);
 run(#observable{item_producer = ItemProducer, subscribers = Subscribers} = ObservableA, State) ->
     {Item, NewState} = apply(ItemProducer, [State]),
     case Item of 
-        {next, Value}      ->
-            broadcast_item(on_next, [Value], Subscribers),
+        ?NEXT(Value)      ->
+            broadcast_item(?ON_NEXT, [Value], Subscribers),
             run(ObservableA, NewState);
-        {error, ErrorInfo} ->
-            broadcast_item(on_error, [ErrorInfo], Subscribers);
-        complete           -> 
-            broadcast_item(on_complete, [], Subscribers);
-        ignore             ->
+        ?ERROR(ErrorInfo) ->
+            broadcast_item(?ON_ERROR, [ErrorInfo], Subscribers);
+        ?COMPLETE           -> 
+            broadcast_item(?ON_COMPLETE, [], Subscribers);
+        ?IGNORE             ->
             run(ObservableA, NewState)
     end.

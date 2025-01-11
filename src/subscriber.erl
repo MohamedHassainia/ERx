@@ -14,6 +14,8 @@
 %%%===================================================================
 %%% Includes, defines, types and records
 %%%===================================================================
+-include("subscriber.hrl").
+
 -record(subscriber,{
     on_next :: fun((any()) -> any()),
     on_error :: fun((any()) -> any()) | undefined,
@@ -68,9 +70,9 @@ create(OnNext, OnError, OnComplete) ->
 get_callback_function(CallbackFunName, Subscriber) ->
     #subscriber{on_next = OnNext, on_complete = OnComplete, on_error = OnError} = Subscriber,
     case CallbackFunName of
-        on_next when OnNext /= undefined -> OnNext;
-        on_complete -> OnComplete;
-        on_error -> OnError
+        ?ON_NEXT when OnNext /= undefined -> OnNext;
+        ?ON_COMPLETE -> OnComplete;
+        ?ON_ERROR -> OnError
     end.
 
 %%%===================================================================
