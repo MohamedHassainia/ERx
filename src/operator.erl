@@ -14,6 +14,8 @@
 %%%===================================================================
 %%% Includes, defines, types and records
 %%%===================================================================
+-include("observable_item.hrl").
+
 -type t(A, ErrorInfo, B) :: fun((observable:item_producer(A, ErrorInfo)) -> observable:t(B, ErrorInfo)).
 
 -define(operator(ItemProducer, State, OpDef),

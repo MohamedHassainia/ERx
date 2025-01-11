@@ -2,22 +2,25 @@
 -module(observable_item).
 
 %% API
--export([create/1,
+-export([create/1,       
+         error/1,       
          bind/2,
-         fail/1,
          ignore/0,
          complete/0,
          is_a_next_item/1,
          is_a_complete_item/1,
          get_value_from_next_item/1,
-         liftM/2]).
+         liftM/2
+]).
 
 -export_type([t/2]).
 
 %%%===================================================================
 %%% Includes, defines, types and records
 %%%===================================================================
--type t(A, ErrorInfo) :: {next, A} | {error, ErrorInfo} | ignore | complete.
+-include("observable_item.hrl").
+
+-type t(A, ErrorInfo) :: observable_item(A, ErrorInfo).
 
 %%%===================================================================
 %%% API
@@ -31,17 +34,17 @@
     when Value :: any().
 %%--------------------------------------------------------------------
 create(Value) ->
-    {next, Value}.
+    ?NEXT(Value).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% @end
 %%--------------------------------------------------------------------
--spec fail(ErrorInfo) -> {error, ErrorInfo}
+-spec error(ErrorInfo) -> {error, ErrorInfo}
     when ErrorInfo :: any().
 %%--------------------------------------------------------------------
-fail(ErrorInfo) ->
-    {error, ErrorInfo}.
+error(ErrorInfo) ->
+    ?ERROR(ErrorInfo).
 
 
 %%--------------------------------------------------------------------
@@ -51,7 +54,7 @@ fail(ErrorInfo) ->
 -spec ignore() -> ignore.
 %%--------------------------------------------------------------------
 ignore() ->
-    ignore.
+    ?IGNORE.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -60,7 +63,7 @@ ignore() ->
 -spec complete() -> complete.
 %%--------------------------------------------------------------------
 complete() ->
-    complete.
+    ?COMPLETE.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -75,10 +78,8 @@ complete() ->
 %%--------------------------------------------------------------------
 bind(ObservableItemA, Fun) ->
     case ObservableItemA of
-        {next, Value}      -> apply(Fun, [Value]);
-        {error, ErrorInfo} -> {error, ErrorInfo};
-        ignore             -> ignore;
-        complete           -> complete
+        ?NEXT(Value) -> apply(Fun, [Value]);
+        Item         -> Item
     end.
 
 %%--------------------------------------------------------------------
