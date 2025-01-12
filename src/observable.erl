@@ -84,7 +84,9 @@ bind(ObservableA, Operator) ->
          A :: any(),
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
-subscribe(ObservableA, Subscribers) ->
+subscribe(ObservableA, Subscriber) when is_record(Subscriber, subscriber) ->
+    subscribe(ObservableA, [Subscriber]);
+subscribe(ObservableA, Subscribers) when is_list(Subscribers) ->
     ObservableWithSubs = ObservableA#observable{subscribers = Subscribers},
     run(ObservableWithSubs).
 
@@ -206,7 +208,7 @@ broadcast_item(CallbackFunName, Args, Subscribers) ->
     [apply(CallbackFun, Args) ||  CallbackFun <- SubsCallbackFuns, CallbackFun /= undefined].
 
 %%--------------------------------------------------------------------
--spec run(ObservableA) -> any()
+-spec run(ObservableA) -> list()
     when ObservableA :: observable:t(A, ErrorInfo),
          A :: any(),
          ErrorInfo :: any().
@@ -215,24 +217,27 @@ run(#observable{state = State} = ObservableA) ->
     run(ObservableA, State).
 
 %%--------------------------------------------------------------------
--spec run(ObservableA, State) -> any()
+-spec run(ObservableA, State) -> list()
     when ObservableA :: observable:t(A, ErrorInfo),
          State :: map(),
          A :: any(),
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
 run(#observable{subscribers = Subscribers}, #{is_completed := true}) ->
-    broadcast_item(?ON_COMPLETE, [], Subscribers);
+    broadcast_item(?ON_COMPLETE, [], Subscribers),
+    [?COMPLETE];
 run(#observable{item_producer = ItemProducer, subscribers = Subscribers} = ObservableA, State) ->
     {Item, NewState} = apply(ItemProducer, [State]),
     case Item of 
         ?NEXT(Value)      ->
             broadcast_item(?ON_NEXT, [Value], Subscribers),
-            run(ObservableA, NewState);
+            [Item | run(ObservableA, NewState)];
         ?ERROR(ErrorInfo) ->
-            broadcast_item(?ON_ERROR, [ErrorInfo], Subscribers);
+            broadcast_item(?ON_ERROR, [ErrorInfo], Subscribers),
+            [?ERROR(ErrorInfo)];
         ?COMPLETE           -> 
-            broadcast_item(?ON_COMPLETE, [], Subscribers);
+            broadcast_item(?ON_COMPLETE, [], Subscribers),
+            [?COMPLETE];
         ?IGNORE             ->
-            run(ObservableA, NewState)
+            [?IGNORE | run(ObservableA, NewState)]
     end.

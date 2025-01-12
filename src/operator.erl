@@ -9,7 +9,10 @@
          drop_while/1,
          take/1,
          take_while/1,
-         filter/1]).
+         filter/1,
+         reduce/2,
+         sum/0,
+         product/0]). 
 
 %%%===================================================================
 %%% Includes, defines, types and records
@@ -252,6 +255,42 @@ drop_while(Pred) ->
                     drop_item(Item, Pred, NewState, Ref)
             end
         end).
+
+%%--------------------------------------------------------------------
+-spec reduce(Fun, InitialValue) -> operator:t(A, ErrorInfo, Acc) when
+    Fun :: fun((A, Acc) -> Acc),
+    A :: any(),
+    Acc :: any(),
+    InitialValue :: Acc,
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+reduce(Fun, InitialValue) ->
+    ?default_operator(
+        fun(?NEXT(Value), State, NewState, StRef) ->
+            CurrentAcc = maps:get(StRef, State, InitialValue),
+            NewAcc = Fun(Value, CurrentAcc),
+            {?IGNORE, maps:put(StRef, NewAcc, NewState)};
+        (?COMPLETE, State, NewState, StRef) ->
+            FinalAcc = maps:get(StRef, State, InitialValue),
+            {?NEXT(FinalAcc), mark_observable_as_completed(NewState)};
+        (Item, _State, NewState, _StRef) ->
+            {Item, NewState}
+        end
+    ).
+
+%%--------------------------------------------------------------------
+-spec sum() -> operator:t(number(), ErrorInfo, number()) when
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+sum() ->
+    reduce(fun(X, Acc) -> X + Acc end, 0).
+
+%%--------------------------------------------------------------------
+-spec product() -> operator:t(number(), ErrorInfo, number()) when
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+product() ->
+    reduce(fun(X, Acc) -> X * Acc end, 1).
 
 %%%===================================================================
 %%% Internal functions

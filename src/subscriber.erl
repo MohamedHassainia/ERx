@@ -16,16 +16,10 @@
 %%%===================================================================
 -include("subscriber.hrl").
 
--record(subscriber,{
-    on_next :: fun((any()) -> any()),
-    on_error :: fun((any()) -> any()) | undefined,
-    on_complete :: fun(() -> any()) | undefined
-}).
-
 -type t(A, E) :: #subscriber{
     on_next :: on_next(A),
-    on_error :: on_error(E) | undefined,
-    on_complete :: on_complete() | undefined
+    on_error :: on_error(E),
+    on_complete :: on_complete()
 }.
 
 -type on_next(A)    :: fun((A) -> any()).

@@ -1,5 +1,6 @@
 -module(prop_observable).
 -include_lib("proper/include/proper.hrl").
+-include("observable_item.hrl").
 
 %%%%%%%%%%%%%%%%%%
 %%% Properties %%%
@@ -193,6 +194,8 @@ prop_pipe_test() ->
         end
 ).
 
+
+
 prop_any_test() ->
     ?FORALL(List, list(integer()),
         begin
@@ -241,6 +244,29 @@ prop_all_test() ->
         end
 ).
 
+prop_error_test() ->
+    ?FORALL(List, list(integer()),
+        begin
+            Pred = fun(X) -> X > 0 end,
+            MapFun = fun(X) -> X * X end,
+            TakeN = 20,
+            AllPred = fun(X) -> X < 21 end,
+            Observable = 
+                observable:pipe(
+                                observable:create(fun(State) -> {?ERROR("Error"), State} end),
+                                [operator:filter(Pred),
+                                 operator:map(MapFun),
+                                 operator:take(TakeN),
+                                 operator:all(AllPred)]
+                                ),
+            Result = ?ERROR("Error"),
+            OnNextActions = fun(_Item) ->
+                                do_nothing
+                            end,
+            [Item] = observable:subscribe(Observable, subscriber:create(OnNextActions)),
+            Result =:= Item
+        end
+).
 
 prop_drop_pipe_test() ->
     ?FORALL(List, list(integer()),
@@ -303,6 +329,58 @@ prop_drop_while_test() ->
                             end,
             StoredList = get_observable_fired_items(Observable, OnNextActions),
             lists:dropwhile(Pred, List) =:= StoredList
+        end).
+
+%%% Reduce Operator Properties %%%
+prop_reduce_test() ->
+    ?FORALL(List, list(integer()),
+        begin
+            Sum = fun(X, Acc) -> X + Acc end,
+            Observable = observable:bind(
+                observable:from_list(List), 
+                operator:reduce(Sum, 0)
+            ),
+            OnNext = fun(_Item) -> ok end,
+            Result = lists:sum(List),
+            ObservableItems = observable:subscribe(Observable, subscriber:create(OnNext)),
+            [?NEXT(Value)] = lists:filter(fun(?NEXT(_Item)) -> true;
+                                     (_Item)       -> false
+                                  end, ObservableItems),
+            Result =:= Value
+        end).
+
+%%% Sum Operator Properties %%%
+prop_sum_test() ->
+    ?FORALL(List, list(number()),
+        begin
+            Observable = observable:bind(
+                observable:from_list(List), 
+                operator:sum()
+            ),
+            OnNext = fun(_Item) -> ok end,
+            ExpectedSum = lists:sum(List),
+            ObservableItems = observable:subscribe(Observable, subscriber:create(OnNext)),
+            [?NEXT(Value)] = lists:filter(fun(?NEXT(_)) -> true;
+                                           (_) -> false
+                                        end, ObservableItems),
+            ExpectedSum =:= Value
+        end).
+
+%%% Product Operator Properties %%%
+prop_product_test() ->
+    ?FORALL(List, list(number()),
+        begin
+            Observable = observable:bind(
+                observable:from_list(List), 
+                operator:product()
+            ),
+            OnNext = fun(_Item) -> ok end,
+            ExpectedProduct = lists:foldl(fun(X, Acc) -> X * Acc end, 1, List),
+            ObservableItems = observable:subscribe(Observable, subscriber:create(OnNext)),
+            [?NEXT(Value)] = lists:filter(fun(?NEXT(_)) -> true;
+                                           (_) -> false
+                                        end, ObservableItems),
+            ExpectedProduct =:= Value
         end).
 
 %%%%%%%%%%%%%%%
