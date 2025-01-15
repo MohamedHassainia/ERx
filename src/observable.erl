@@ -7,6 +7,7 @@
          from_value/1,
          zip2/2,
          zip/1,
+         merge/1,
          bind/2,
          pipe/2,
          subscribe/2]).
@@ -177,6 +178,46 @@ apply_observables_and_zip_items([Observable | Observables], Result, State) ->
     end.
 
 %%--------------------------------------------------------------------
+-spec merge(Observables) -> observable:t(any(), ErrorInfo) when
+    Observables :: list(observable:t(A, ErrorInfo)),
+    A :: any(),
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+merge([]) ->
+    ?stateless_observable(?COMPLETE);
+merge(Observables) when is_list(Observables) ->
+    ?observable(State, Ref,
+        begin
+            Obs = maps:get(Ref, State, Observables),
+            merge_observables(Ref, Obs, State)
+        end
+    ).
+
+%%--------------------------------------------------------------------
+-spec merge_observables(Ref, Observables, State) -> {Item, State} when
+    Ref :: integer(),
+    Observables :: list(observable:t(A, ErrorInfo)),
+    State :: state(),
+    Item :: observable_item:t(any(), ErrorInfo),
+    A :: any(),
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+merge_observables(_Ref, [], State) ->
+    {?COMPLETE, State};
+merge_observables(Ref, [Observable | Obs], State) ->
+    {Item, NewState} = apply_observable(Observable, State),
+    case {Item, Obs} of
+        {?ERROR(_ErrorInfo), _} ->
+            {Item, maps:put(Ref, Obs, NewState)};
+        {?COMPLETE, []} ->
+            {?COMPLETE, NewState};
+        {?COMPLETE, _} ->
+            merge_observables(Ref, Obs, State);
+        {Item, _} ->
+            {Item, maps:put(Ref, Obs ++ [Observable], NewState)}
+    end.
+
+%%--------------------------------------------------------------------
 -spec pipe(Observable, Operators) -> observable:t(A, ErrorInfo) when
     A :: any(),
     ErrorInfo :: any(),
@@ -192,6 +233,16 @@ pipe(Observable, Operators) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+%%--------------------------------------------------------------------
+-spec apply_observable(observable:t(A, ErrorInfo), State) -> {Item, State} when
+    Item :: observable_item:t(A, ErrorInfo),
+    State :: state(),
+    A :: any(),
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+apply_observable(#observable{item_producer = ItemProducer}, State) ->
+    apply(ItemProducer, [State]).
 
 %%--------------------------------------------------------------------
 -spec broadcast_item(CallbackFunName, Args, Subscribers) -> list() when

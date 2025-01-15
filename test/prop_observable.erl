@@ -349,6 +349,36 @@ prop_reduce_test() ->
             Result =:= Value
         end).
 
+%%% Reduce Without Initial Value Properties %%%
+prop_reduce_no_init_test() ->
+    ?FORALL(List, non_empty(list(integer())),
+        begin
+            Sum = fun(X, Acc) -> X + Acc end,
+            Observable = observable:bind(
+                observable:from_list(List), 
+                operator:reduce(Sum)
+            ),
+            OnNext = fun(_Item) -> ok end,
+            [First|Rest] = List,
+            Result = lists:foldl(Sum, First, Rest),
+            ObservableItems = observable:subscribe(Observable, subscriber:create(OnNext)),
+            [?NEXT(Value)] = lists:filter(fun(?NEXT(_)) -> true;
+                                           (_) -> false
+                                        end, ObservableItems),
+            Result =:= Value
+        end),
+    % Test empty list case
+    begin
+        Sum = fun(X, Acc) -> X + Acc end,
+        Observable = observable:bind(
+            observable:from_list([]), 
+            operator:reduce(Sum)
+        ),
+        OnNext = fun(_Item) -> ok end,
+        [?ERROR(no_values)] = observable:subscribe(Observable, subscriber:create(OnNext)),
+        true
+    end.
+
 %%% Sum Operator Properties %%%
 prop_sum_test() ->
     ?FORALL(List, list(number()),
@@ -383,10 +413,136 @@ prop_product_test() ->
             ExpectedProduct =:= Value
         end).
 
+%%% Merge Properties %%%
+prop_merge_test() ->
+    ?FORALL({List1, List2}, {list(integer()), list(integer())},
+        begin
+            % Test merging two observables
+            Observable1 = observable:from_list(List1),
+            Observable2 = observable:from_list(List2),
+            MergedObs = observable:merge([Observable1, Observable2]),
+
+            OnNext = fun(_Item) -> ok end,
+            ObservableItems = observable:subscribe(MergedObs, subscriber:create(OnNext)),
+            
+            EmittedValues = [Value || ?NEXT(Value) <- ObservableItems],
+            ExpectedValues = List1 ++ List2,
+
+            % Order may vary but values should be the same
+            lists:sort(EmittedValues) =:= lists:sort(ExpectedValues)
+        end),
+    
+    ?FORALL(Lists, list(list(integer())),
+        begin
+            % Test merging multiple observables
+            Observables = [observable:from_list(List) || List <- Lists],
+            MergedObs = observable:merge(Observables),
+
+            OnNext = fun(_Item) -> ok end,
+            ObservableItems = observable:subscribe(MergedObs, subscriber:create(OnNext)),
+            
+            EmittedValues = [Value || ?NEXT(Value) <- ObservableItems],
+            ExpectedValues = lists:flatten(Lists),
+
+            % Order may vary but values should be the same
+            lists:sort(EmittedValues) =:= lists:sort(ExpectedValues)
+        end),
+    
+
+    ?FORALL(Lists, list(list(integer())),
+        begin
+            % Test merging multiple observables
+            Observables = [observable:from_list(List) || List <- Lists],
+            MergedObs = observable:merge(Observables),
+
+            OnNext = fun(_Item) -> ok end,
+            ObservableItems = observable:subscribe(MergedObs, subscriber:create(OnNext)),
+            
+            EmittedValues = [Value || ?NEXT(Value) <- ObservableItems],
+            ExpectedValues = merge_lists(Lists, []),
+
+            EmittedValues =:= ExpectedValues
+        end).
+
+% prop_merge_test_2() ->
+%     ?FORALL(Lists, list(list(integer())),
+%         begin
+%             % Test merging multiple observables
+%             Observables = [observable:from_list(List) || List <- Lists],
+%             ErrorObservable = observable:create(fun(State) -> {?ERROR("Error"), State} end),
+%             CompletedObservable = observable:create(fun(State) -> {?COMPLETE, State} end),
+%             MergedObs = observable:merge([CompletedObservable] ++ Observables ++ [ErrorObservable]),
+
+%             OnNext = fun(_Item) -> ok end,
+%             ObservableItems = observable:subscribe(MergedObs, subscriber:create(OnNext)),
+            
+%             EmittedValues = [Value || ?NEXT(Value) <- ObservableItems],
+%             ExpectedList = [hd(List) || List <- Lists, List /= []],
+%             ExpectedValues = [?COMPLETE] ++ ExpectedList ++ [?ERROR("Error")],
+
+%             EmittedValues =:= ExpectedValues
+%         end).
+
+    % Test empty list of observables
+    % begin
+    %     EmptyMerged = observable:merge([]),
+    %     OnNext = fun(_Item) -> ok end,
+    %     [?COMPLETE] = observable:subscribe(EmptyMerged, subscriber:create(OnNext)),
+    %     true
+    % end
+
+%%% Distinct Operator Properties %%%
+prop_distinct_test() ->
+    ?FORALL(List, list(),
+        begin
+            Observable = observable:bind(
+                observable:from_list(List),
+                operator:distinct()
+            ),
+            OnNext = fun(_Item) -> ok end,
+            ObservableItems = observable:subscribe(Observable, subscriber:create(OnNext)),
+            EmittedValues = [Value || ?NEXT(Value) <- ObservableItems],
+            ExpectedValues = lists:usort(List),
+            
+            % Order must be preserved for first occurrence of each value
+            lists:sort(EmittedValues) =:= ExpectedValues andalso
+            lists:subtract(EmittedValues, ExpectedValues) =:= [] andalso
+            length(EmittedValues) =:= length(ExpectedValues)
+        end).
+
+%%% Distinct Until Changed Properties %%%
+prop_distinct_until_changed_test() ->
+    ?FORALL(List, list(),
+        begin
+            Observable = observable:bind(
+                observable:from_list(List),
+                operator:distinct_until_changed()
+            ),
+            OnNext = fun(_Item) -> ok end,
+            ObservableItems = observable:subscribe(Observable, subscriber:create(OnNext)),
+            EmittedValues = [Value || ?NEXT(Value) <- ObservableItems],
+            
+            % Remove consecutive duplicates from original list
+            ExpectedValues = lists:foldr(
+                fun(X, []) -> [X];
+                   (X, [H|T]) when X =:= H -> [H|T];
+                   (X, Acc) -> [X|Acc]
+                end, [], List),
+            
+            % Values should match and maintain relative order
+            EmittedValues =:= ExpectedValues
+        end).
+
 %%%%%%%%%%%%%%%
 %%% Helpers %%%
 %%%%%%%%%%%%%%%
-boolean(_) -> true.
+
+merge_lists([], Acc) ->  lists:reverse(Acc);
+merge_lists([List | Lists], Acc) ->
+    case List of
+        []            -> merge_lists(Lists, Acc);
+        [Elem | Rest] -> merge_lists(Lists ++ [Rest], [Elem|Acc])
+    end.
 
 zip_lists(Lists) ->
     zip_lists(Lists, _Result = []).

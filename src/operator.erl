@@ -12,7 +12,10 @@
          filter/1,
          reduce/2,
          sum/0,
-         product/0]). 
+         product/0,
+         reduce/1,
+         distinct/0,
+         distinct_until_changed/0]).  % Add distinct_until_changed to exports
 
 %%%===================================================================
 %%% Includes, defines, types and records
@@ -279,6 +282,37 @@ reduce(Fun, InitialValue) ->
     ).
 
 %%--------------------------------------------------------------------
+-spec reduce(Fun :: fun((A, A) -> A)) -> operator:t(A, ErrorInfo, A) when
+    A :: any(),
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+reduce(Fun) ->
+    ?default_operator(
+        fun(?NEXT(Value), State, NewState, StRef) ->
+            case maps:get(StRef, State, undefined) of
+                undefined ->
+                    % First value becomes initial accumulator
+                    {?IGNORE, maps:put(StRef, Value, NewState)};
+                Acc ->
+                    % Subsequent values are reduced using the function
+                    NewAcc = Fun(Value, Acc),
+                    {?IGNORE, maps:put(StRef, NewAcc, NewState)}
+            end;
+        (?COMPLETE, State, NewState, StRef) ->
+            case maps:get(StRef, State, undefined) of
+                undefined ->
+                    % Complete without any values
+                    {?ERROR(no_values), NewState};
+                FinalAcc ->
+                    % Emit final accumulated value
+                    {?NEXT(FinalAcc), mark_observable_as_completed(NewState)}
+            end;
+        (Item, _State, NewState, _StRef) ->
+            {Item, NewState}
+        end
+    ).
+
+%%--------------------------------------------------------------------
 -spec sum() -> operator:t(number(), ErrorInfo, number()) when
     ErrorInfo :: any().
 %%--------------------------------------------------------------------
@@ -291,6 +325,53 @@ sum() ->
 %%--------------------------------------------------------------------
 product() ->
     reduce(fun(X, Acc) -> X * Acc end, 1).
+
+%%--------------------------------------------------------------------
+-spec distinct() -> operator:t(A, ErrorInfo, A) when
+    A :: any(),
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+distinct() ->
+    ?default_operator(
+        fun(?NEXT(Value), State, NewState, StRef) ->
+            SeenValues = maps:get(StRef, State, sets:new()),
+            case sets:is_element(Value, SeenValues) of 
+                true -> 
+                    {?IGNORE, NewState};
+                false -> 
+                    NewSeenValues = sets:add_element(Value, SeenValues),
+                    {?NEXT(Value), maps:put(StRef, NewSeenValues, NewState)}
+            end;
+           (Item, _State, NewState, _StRef) ->
+            {Item, NewState}
+        end
+    ).
+
+%%--------------------------------------------------------------------
+-spec distinct_until_changed() -> operator:t(A, ErrorInfo, A) when
+    A :: any(),
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+distinct_until_changed() ->
+    UniqueValue = {unique_int, erlang:unique_integer()},
+
+    ?default_operator(
+        fun(?NEXT(Value), State, NewState, StRef) ->
+            PrevValue = maps:get(StRef, State, UniqueValue),
+            case PrevValue of
+                UniqueValue -> 
+                    {?NEXT(Value), maps:put(StRef, Value, NewState)};
+                Value ->
+                    % Same as previous value, ignore
+                    {?IGNORE, NewState};
+                _ -> 
+                    % Different from previous value, emit and update
+                    {?NEXT(Value), maps:put(StRef, Value, NewState)}
+            end;
+           (Item, _State, NewState, _StRef) ->
+            {Item, NewState}
+        end
+    ).
 
 %%%===================================================================
 %%% Internal functions
