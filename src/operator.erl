@@ -15,12 +15,14 @@
          product/0,
          reduce/1,
          distinct/0,
-         distinct_until_changed/0]).  % Add distinct_until_changed to exports
+         distinct_until_changed/0,
+         flat_map/1]).  % Add flat_map to exports
 
 %%%===================================================================
 %%% Includes, defines, types and records
 %%%===================================================================
 -include("observable_item.hrl").
+-include("observable.hrl").
 
 -type t(A, ErrorInfo, B) :: fun((observable:item_producer(A, ErrorInfo)) -> observable:t(B, ErrorInfo)).
 
@@ -369,6 +371,48 @@ distinct_until_changed() ->
                     {?NEXT(Value), maps:put(StRef, Value, NewState)}
             end;
            (Item, _State, NewState, _StRef) ->
+            {Item, NewState}
+        end
+    ).
+
+%%--------------------------------------------------------------------
+-spec flat_map(MapFun) -> operator:t(A, ErrorInfo, B) when
+    MapFun :: fun((A) -> observable:t(B, ErrorInfo)),
+    A :: any(),
+    B :: any(),
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+flat_map(MapFun) ->
+    ?default_operator(
+        fun(?NEXT(Value), State, NewState, StRef) ->
+            InnerObservable = MapFun(Value),
+            % Get inner producer and merge its state
+            #observable{item_producer = InnerProducer} = InnerObservable,
+            {InnerItem, InnerState} = apply(InnerProducer, [NewState]),
+            % Store inner producer in state if not complete
+            case InnerItem of
+                ?COMPLETE -> 
+                    {?IGNORE, InnerState};
+                ?ERROR(_) -> 
+                    {InnerItem, InnerState};
+                _ ->
+                    CurrentInners = maps:get(StRef, State, []),
+                    {InnerItem, maps:put(StRef, [InnerProducer|CurrentInners], InnerState)}
+            end;
+        (?COMPLETE, State, NewState, StRef) ->
+            % Try to get more values from inner observables
+            case maps:get(StRef, State, []) of
+                [] -> {?COMPLETE, NewState};
+                [Inner|Rest] ->
+                    {InnerItem, InnerState} = apply(Inner, [NewState]),
+                    case InnerItem of
+                        ?COMPLETE -> 
+                            {?HALT, maps:put(StRef, Rest, InnerState)};
+                        _ ->
+                            {InnerItem, maps:put(StRef, [Inner|Rest], InnerState)}
+                    end
+            end;
+        (Item, _State, NewState, _StRef) ->
             {Item, NewState}
         end
     ).

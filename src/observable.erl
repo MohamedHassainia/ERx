@@ -21,21 +21,7 @@
 %%%===================================================================
 -include("observable_item.hrl").
 -include("subscriber.hrl").
-
--type state() :: #{is_completed => boolean()}.
--type item_producer(A, E) :: fun((state()) -> {observable_item:t(A, E), state()}).
-
--record(observable, {
-    state = #{is_completed => false} :: state(),
-    item_producer                    :: item_producer(any(), any()),
-    subscribers = []                 :: list(subscriber:t(any(), any()))
-}).
-
--type t(A, ErrorInfo) :: #observable{
-    state          :: state() | undefined,
-    item_producer :: item_producer(A, ErrorInfo),
-    subscribers    :: list(subscriber:t(A, ErrorInfo))
-}.
+-include("observable.hrl").
 
 -define(observable(State, StRef, ObDef),
     Ref = erlang:unique_integer(),
@@ -279,7 +265,7 @@ run(#observable{subscribers = Subscribers}, #{is_completed := true}) ->
     [?COMPLETE];
 run(#observable{item_producer = ItemProducer, subscribers = Subscribers} = ObservableA, State) ->
     {Item, NewState} = apply(ItemProducer, [State]),
-    case Item of 
+    case Item of
         ?NEXT(Value)      ->
             broadcast_item(?ON_NEXT, [Value], Subscribers),
             [Item | run(ObservableA, NewState)];
@@ -289,6 +275,8 @@ run(#observable{item_producer = ItemProducer, subscribers = Subscribers} = Obser
         ?COMPLETE           -> 
             broadcast_item(?ON_COMPLETE, [], Subscribers),
             [?COMPLETE];
+        ?HALT              -> 
+            [?HALT | run(ObservableA, NewState)];
         ?IGNORE             ->
             [?IGNORE | run(ObservableA, NewState)]
     end.

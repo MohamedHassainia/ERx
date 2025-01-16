@@ -533,6 +533,33 @@ prop_distinct_until_changed_test() ->
             EmittedValues =:= ExpectedValues
         end).
 
+%%% FlatMap Operator Properties %%%
+prop_flat_map_test() ->
+    ?FORALL({List, MultiplierRange}, {list(integer()), range(1,5)},
+        begin
+            % Map each value to an observable that repeats it N times
+            MapToObservable = fun(X) -> 
+                RepeatedList = lists:duplicate(MultiplierRange, X),
+                observable:from_list(RepeatedList)
+            end,
+
+            Observable = observable:bind(
+                observable:from_list(List),
+                operator:flat_map(MapToObservable)
+            ),
+            
+            OnNext = fun(_Item) -> ok end,
+            ObservableItems = observable:subscribe(Observable, subscriber:create(OnNext)),
+            EmittedValues = [Value || ?NEXT(Value) <- ObservableItems],
+            
+            % Each value should appear MultiplierRange times
+            ExpectedValues = lists:flatten([
+                lists:duplicate(MultiplierRange, X) || X <- List
+            ]),
+            
+            EmittedValues =:= ExpectedValues
+        end).
+
 %%%%%%%%%%%%%%%
 %%% Helpers %%%
 %%%%%%%%%%%%%%%
