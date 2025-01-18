@@ -79,6 +79,7 @@ complete() ->
 bind(ObservableItemA, Fun) ->
     case ObservableItemA of
         ?NEXT(Value) -> apply(Fun, [Value]);
+        ?LAST(Value) -> apply(Fun, [Value]);
         Item         -> Item
     end.
 

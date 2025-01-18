@@ -260,15 +260,19 @@ run(#observable{state = State} = ObservableA) ->
          A :: any(),
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
-run(#observable{subscribers = Subscribers}, #{is_completed := true}) ->
-    broadcast_item(?ON_COMPLETE, [], Subscribers),
-    [?COMPLETE];
+% run(#observable{subscribers = Subscribers}, #{is_completed := true}) ->
+%     broadcast_item(?ON_COMPLETE, [], Subscribers),
+%     [?COMPLETE];
 run(#observable{item_producer = ItemProducer, subscribers = Subscribers} = ObservableA, State) ->
     {Item, NewState} = apply(ItemProducer, [State]),
     case Item of
         ?NEXT(Value)      ->
             broadcast_item(?ON_NEXT, [Value], Subscribers),
             [Item | run(ObservableA, NewState)];
+        ?LAST(Value)      ->
+            broadcast_item(?ON_NEXT, [Value], Subscribers),
+            broadcast_item(?ON_COMPLETE, [], Subscribers),
+            [?NEXT(Value) | [?COMPLETE]];
         ?ERROR(ErrorInfo) ->
             broadcast_item(?ON_ERROR, [ErrorInfo], Subscribers),
             [?ERROR(ErrorInfo)];
