@@ -492,7 +492,29 @@ prop_merge_test() ->
             EmittedValues =:= ExpectedValues
         end).
 
-
+%%% Property test for distinct_until_changed operator %%%
+prop_distinct_until_changed_test() ->
+    ?FORALL(List, list(),
+        begin
+            Observable = observable:bind(
+                observable:from_list(List), 
+                operator:distinct_until_changed()
+            ),
+            OnNext = fun(_Item) -> ok end,
+            StoredList = get_observable_fired_items(Observable, OnNext),
+            
+            % Expected result: removes consecutive duplicates while preserving order
+            ExpectedList = lists:foldl(
+                fun(Elem, []) -> [Elem];
+                   (Elem, [Prev|_]=Acc) when Elem =:= Prev -> Acc;
+                   (Elem, Acc) -> [Elem|Acc]
+                end, 
+                [], 
+                lists:reverse(List)
+            ),
+            
+            StoredList =:= ExpectedList
+        end).
 
 %%%%%%%%%%%%%%%
 %%% Helpers %%%
