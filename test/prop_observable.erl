@@ -1,3 +1,14 @@
+%%%-------------------------------------------------------------------
+%%% @doc
+%%% Property-based tests for the Observable implementation.
+%%% Tests key Observable operations and combinations:
+%%% - List conversion
+%%% - Mapping and filtering
+%%% - Zipping and merging
+%%% - Reduction operations
+%%% Uses PropEr for generating test cases.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(prop_observable).
 -include_lib("proper/include/proper.hrl").
 -include("observable_item.hrl").

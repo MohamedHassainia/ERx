@@ -1,4 +1,9 @@
 %%%-------------------------------------------------------------------
+%%% @doc
+%%% Represents items that can be emitted by an Observable stream.
+%%% Handles next values, errors, completion signals and transformations.
+%%% @end
+%%%-------------------------------------------------------------------
 -module(observable_item).
 
 %% API
@@ -27,7 +32,9 @@
 %%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @doc
+%% @doc Creates a next item containing a value
+%% @param Value The value to wrap in a next item
+%% @returns {next, Value} tuple
 %% @end
 %%--------------------------------------------------------------------
 -spec create(Value) -> {next, Value}
@@ -37,7 +44,9 @@ create(Value) ->
     ?NEXT(Value).
 
 %%--------------------------------------------------------------------
-%% @doc
+%% @doc Creates an error item
+%% @param ErrorInfo The error information to wrap
+%% @returns {error, ErrorInfo} tuple
 %% @end
 %%--------------------------------------------------------------------
 -spec error(ErrorInfo) -> {error, ErrorInfo}
@@ -45,7 +54,6 @@ create(Value) ->
 %%--------------------------------------------------------------------
 error(ErrorInfo) ->
     ?ERROR(ErrorInfo).
-
 
 %%--------------------------------------------------------------------
 %% @doc
