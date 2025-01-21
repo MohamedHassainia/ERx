@@ -34,7 +34,7 @@ Add as a rebar3 dependency:
 
 ```erlang
 {deps, [
-    {ereactive, {git, "https://github.com/MohamedHassainia/ereactive.git", {tag, "0.1.0"}}}
+    {erx, {git, "https://github.com/MohamedHassainia/erx.git", {tag, "0.1.0"}}}
 ]}.
 ```
 
