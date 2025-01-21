@@ -15,8 +15,7 @@
          product/0,
          reduce/1,
          distinct/0,
-         distinct_until_changed/0,
-         flat_map/1]).  % Add flat_map to exports
+         distinct_until_changed/0]).
 
 %%%===================================================================
 %%% Includes, defines, types and records
@@ -139,26 +138,7 @@ filter(Pred) ->
     when A :: any(),
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
-% take(N) when N >= 0 ->
-%     Ref = erlang:unique_integer(),
-%     ?operator(ItemProducer, St,
-%         begin
-%             State = add_new_state_field(Ref, N, St),
-%             case maps:get(Ref, State, undefined) of
-%                 0 -> 
-%                     {?COMPLETE, State};
-%                 NItem -> % TDOO add condition N is bigger or equal to zero
-%                     {Item, NewState} = apply(ItemProducer, [State]),
-%                     case observable_item:is_a_next_item(Item) of
-%                         true ->
-%                             {Item, maps:put(Ref, NItem - 1, NewState)};
-%                         false ->
-%                             {Item, NewState}
-%                     end
-%             end
-%         end).
 take(N) when N >= 0 ->
-    % Ref = erlang:unique_integer(),
     ?default_operator(
         fun(?NEXT(Value), State, NewState, StRef) ->
             NItemLeftToTake = maps:get(StRef, State, N),
@@ -179,22 +159,6 @@ take(N) when N >= 0 ->
             {Item, NewState}
         end
     ).
-    % ?operator(ItemProducer, St,
-    %     begin
-    %         State = add_new_state_field(Ref, N, St),
-    %         case maps:get(Ref, State, undefined) of
-    %             0 -> 
-    %                 {?COMPLETE, State};
-    %             NItem -> % TDOO add condition N is bigger or equal to zero
-    %                 {Item, NewState} = apply(ItemProducer, [State]),
-    %                 case observable_item:is_a_next_item(Item) of
-    %                     true ->
-    %                         {Item, maps:put(Ref, NItem - 1, NewState)};
-    %                     false ->
-    %                         {Item, NewState}
-    %                 end
-    %         end
-    %     end).
 
 %%--------------------------------------------------------------------
 -spec take_while(Pred) -> operator:t(A, ErrorInfo, A) when
@@ -459,124 +423,9 @@ distinct_until_changed() ->
         end
     ).
 
-%%--------------------------------------------------------------------
--spec flat_map(MapFun) -> operator:t(A, ErrorInfo, B) when
-    MapFun :: fun((A) -> observable:t(B, ErrorInfo)),
-    A :: any(),
-    B :: any(),
-    ErrorInfo :: any().
-%%--------------------------------------------------------------------
-flat_map(MapFun) ->
-
-    ?statefull_operator(
-        fun(?NEXT(Value), _State, NewState, StRef, undefined) ->
-            InnerObservables = MapFun(Value),
-            #observable{item_producer = InnerProducer} = InnerObservable,
-            {InnerItem, InnerState} = apply(InnerProducer, [NewState]),
-            case InnerItem of
-                ?COMPLETE -> {?IGNORE, InnerState};
-                ?ERROR(_) -> {InnerItem, InnerState};
-                ?LAST(InnerValue) -> {?NEXT(InnerValue), InnerState};
-                ?NEXT(InnerValue) -> {?NEXT(InnerValue), maps:put(StRef, InnerProducer, InnerState)}
-            end;
-
-        (?LAST(Value), _State, NewState, StRef, undefined) ->
-            InnerObservable = MapFun(Value),
-            #observable{item_producer = InnerProducer} = InnerObservable,
-            {InnerItem, InnerState} = apply(InnerProducer, [NewState]),
-            case InnerItem of
-                ?COMPLETE -> process_remaining_producers([InnerProducer], InnerState, StRef);
-                ?ERROR(_) -> {InnerItem, InnerState};
-                ?LAST(InnerValue) -> {?LAST(InnerValue), InnerState};
-                ?NEXT(InnerValue) -> {?NEXT(InnerValue), maps:put(StRef, InnerProducer, InnerState)}
-            end;
-
-        (?COMPLETE, _State, NewState, StRef, undefined) ->
-            process_remaining_producers([], NewState, StRef);
-
-        (?NEXT(Value), State, NewState, StRef, InnerProducer) ->
-            {InnerItem, InnerState} = apply(InnerProducer, [NewState]),
-            case InnerItem of
-                ?COMPLETE -> {?IGNORE, InnerState};
-                ?ERROR(_) -> {InnerItem, InnerState};
-                ?LAST(InnerValue) -> {?NEXT(InnerValue), InnerState};
-                ?NEXT(InnerValue) -> {?NEXT(InnerValue), maps:put(StRef, InnerProducer, InnerState)}
-            end
-        end
-
-    )
-    ?default_operator(
-        fun(?NEXT(Value), State, NewState, StRef) ->
-            % Map to inner observable and get its producer
-            InnerObservable = MapFun(Value),
-            #observable{item_producer = InnerProducer} = InnerObservable,
-            
-            % Run first item from inner observable
-            {InnerItem, InnerState} = apply(InnerProducer, [NewState]),
-            
-            % Handle inner observable's result
-            case InnerItem of
-                ?COMPLETE -> 
-                    {?IGNORE, InnerState};
-                ?ERROR(_) -> 
-                    {InnerItem, InnerState};
-                ?LAST(InnerValue) ->
-                    {?NEXT(InnerValue), InnerState};
-                ?NEXT(InnerValue) ->
-                    CurrentInners = maps:get(StRef, State, []),
-                    {?NEXT(InnerValue), maps:put(StRef, [InnerProducer|CurrentInners], InnerState)}
-            end;
-
-        (?LAST(Value), State, NewState, StRef) ->
-            InnerObservable = MapFun(Value),
-            #observable{item_producer = InnerProducer} = InnerObservable,
-            
-            % For last value, run inner observable to completion
-            {InnerItem, InnerState} = apply(InnerProducer, [NewState]),
-            case InnerItem of
-                ?COMPLETE -> 
-                    process_remaining_producers(maps:get(StRef, State, []), InnerState, StRef);
-                ?ERROR(_) -> 
-                    {InnerItem, InnerState};
-                ?LAST(InnerValue) ->
-                    case maps:get(StRef, State, []) of
-                        [] -> {?LAST(InnerValue), InnerState};
-                        Producers -> 
-                            {?NEXT(InnerValue), maps:put(StRef, Producers, InnerState)}
-                    end;
-                ?NEXT(InnerValue) ->
-                    case maps:get(StRef, State, []) of
-                        [] -> {?LAST(InnerValue), InnerState};
-                        Producers -> 
-                            {?NEXT(InnerValue), maps:put(StRef, [InnerProducer|Producers], InnerState)}
-                    end
-            end;
-
-        (?COMPLETE, State, NewState, StRef) ->
-            process_remaining_producers(maps:get(StRef, State, []), NewState, StRef);
-
-        (Item, _State, NewState, _StRef) ->
-            {Item, NewState}
-        end
-    ).
-
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-% %%--------------------------------------------------------------------
-% -spec add_new_state_field(Key, Value, State) -> map() when
-%     Key :: any(),
-%     Value :: any(),
-%     State :: map().
-% %%--------------------------------------------------------------------
-% add_new_state_field(Key, Value, State) ->
-%     case maps:get(Key, State, undefined) of
-%         undefined ->
-%             maps:put(Key, Value, State);
-%         _ ->
-%             State
-%     end.
 
 %%--------------------------------------------------------------------
 -spec mark_observable_as_completed(State :: observable:state()) -> map().

@@ -482,13 +482,6 @@ prop_merge_test() ->
         end).
 
 
-    % Test empty list of observables
-    % begin
-    %     EmptyMerged = observable:merge([]),
-    %     OnNext = fun(_Item) -> ok end,
-    %     [?COMPLETE] = observable:subscribe(EmptyMerged, subscriber:create(OnNext)),
-    %     true
-    % end
 
 %%%%%%%%%%%%%%%
 %%% Helpers %%%
