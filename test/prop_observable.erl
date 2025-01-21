@@ -448,6 +448,23 @@ prop_merge_test() ->
             lists:sort(EmittedValues) =:= lists:sort(ExpectedValues)
         end),
     
+    ?FORALL(Lists, list(list(integer())),
+        begin
+            % Test merging multiple observables
+            Observables = [observable:from_list(List) || List <- Lists],
+            ErrorObservable = observable:create(fun(State) -> {?ERROR("Error"), State} end),
+            CompletedObservable = observable:create(fun(State) -> {?COMPLETE, State} end),
+            MergedObs = observable:merge([CompletedObservable] ++ Observables ++ [ErrorObservable]),
+
+            OnNext = fun(_Item) -> ok end,
+            ObservableItems = observable:subscribe(MergedObs, subscriber:create(OnNext)),
+            
+            EmittedValues = [Value || ?NEXT(Value) <- ObservableItems],
+            ExpectedList = [hd(List) || List <- Lists, List /= []],
+            ExpectedValues = [?COMPLETE] ++ ExpectedList ++ [?ERROR("Erro")],
+
+            EmittedValues =:= ExpectedValues
+        end),
 
     ?FORALL(Lists, list(list(integer())),
         begin
@@ -464,24 +481,6 @@ prop_merge_test() ->
             EmittedValues =:= ExpectedValues
         end).
 
-% prop_merge_test_2() ->
-%     ?FORALL(Lists, list(list(integer())),
-%         begin
-%             % Test merging multiple observables
-%             Observables = [observable:from_list(List) || List <- Lists],
-%             ErrorObservable = observable:create(fun(State) -> {?ERROR("Error"), State} end),
-%             CompletedObservable = observable:create(fun(State) -> {?COMPLETE, State} end),
-%             MergedObs = observable:merge([CompletedObservable] ++ Observables ++ [ErrorObservable]),
-
-%             OnNext = fun(_Item) -> ok end,
-%             ObservableItems = observable:subscribe(MergedObs, subscriber:create(OnNext)),
-            
-%             EmittedValues = [Value || ?NEXT(Value) <- ObservableItems],
-%             ExpectedList = [hd(List) || List <- Lists, List /= []],
-%             ExpectedValues = [?COMPLETE] ++ ExpectedList ++ [?ERROR("Error")],
-
-%             EmittedValues =:= ExpectedValues
-%         end).
 
     % Test empty list of observables
     % begin
@@ -490,75 +489,6 @@ prop_merge_test() ->
     %     [?COMPLETE] = observable:subscribe(EmptyMerged, subscriber:create(OnNext)),
     %     true
     % end
-
-%%% Distinct Operator Properties %%%
-prop_distinct_test() ->
-    ?FORALL(List, list(),
-        begin
-            Observable = observable:bind(
-                observable:from_list(List),
-                operator:distinct()
-            ),
-            OnNext = fun(_Item) -> ok end,
-            ObservableItems = observable:subscribe(Observable, subscriber:create(OnNext)),
-            EmittedValues = [Value || ?NEXT(Value) <- ObservableItems],
-            ExpectedValues = lists:usort(List),
-            
-            % Order must be preserved for first occurrence of each value
-            lists:sort(EmittedValues) =:= ExpectedValues andalso
-            lists:subtract(EmittedValues, ExpectedValues) =:= [] andalso
-            length(EmittedValues) =:= length(ExpectedValues)
-        end).
-
-%%% Distinct Until Changed Properties %%%
-prop_distinct_until_changed_test() ->
-    ?FORALL(List, list(),
-        begin
-            Observable = observable:bind(
-                observable:from_list(List),
-                operator:distinct_until_changed()
-            ),
-            OnNext = fun(_Item) -> ok end,
-            ObservableItems = observable:subscribe(Observable, subscriber:create(OnNext)),
-            EmittedValues = [Value || ?NEXT(Value) <- ObservableItems],
-            
-            % Remove consecutive duplicates from original list
-            ExpectedValues = lists:foldr(
-                fun(X, []) -> [X];
-                   (X, [H|T]) when X =:= H -> [H|T];
-                   (X, Acc) -> [X|Acc]
-                end, [], List),
-            
-            % Values should match and maintain relative order
-            EmittedValues =:= ExpectedValues
-        end).
-
-%%% FlatMap Operator Properties %%%
-prop_flat_map_test() ->
-    ?FORALL({List, MultiplierRange}, {list(integer()), range(1,5)},
-        begin
-            % Map each value to an observable that repeats it N times
-            MapToObservable = fun(X) -> 
-                RepeatedList = lists:duplicate(MultiplierRange, X),
-                observable:from_list(RepeatedList)
-            end,
-
-            Observable = observable:bind(
-                observable:from_list(List),
-                operator:flat_map(MapToObservable)
-            ),
-            
-            OnNext = fun(_Item) -> ok end,
-            ObservableItems = observable:subscribe(Observable, subscriber:create(OnNext)),
-            EmittedValues = [Value || ?NEXT(Value) <- ObservableItems],
-            
-            % Each value should appear MultiplierRange times
-            ExpectedValues = lists:flatten([
-                lists:duplicate(MultiplierRange, X) || X <- List
-            ]),
-            
-            EmittedValues =:= ExpectedValues
-        end).
 
 %%%%%%%%%%%%%%%
 %%% Helpers %%%

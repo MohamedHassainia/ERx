@@ -469,7 +469,41 @@ distinct_until_changed() ->
 flat_map(MapFun) ->
 
     ?statefull_operator(
-        fun(?NEXT(Value), _State, NewState, StRef, OperatorState) -
+        fun(?NEXT(Value), _State, NewState, StRef, undefined) ->
+            InnerObservables = MapFun(Value),
+            #observable{item_producer = InnerProducer} = InnerObservable,
+            {InnerItem, InnerState} = apply(InnerProducer, [NewState]),
+            case InnerItem of
+                ?COMPLETE -> {?IGNORE, InnerState};
+                ?ERROR(_) -> {InnerItem, InnerState};
+                ?LAST(InnerValue) -> {?NEXT(InnerValue), InnerState};
+                ?NEXT(InnerValue) -> {?NEXT(InnerValue), maps:put(StRef, InnerProducer, InnerState)}
+            end;
+
+        (?LAST(Value), _State, NewState, StRef, undefined) ->
+            InnerObservable = MapFun(Value),
+            #observable{item_producer = InnerProducer} = InnerObservable,
+            {InnerItem, InnerState} = apply(InnerProducer, [NewState]),
+            case InnerItem of
+                ?COMPLETE -> process_remaining_producers([InnerProducer], InnerState, StRef);
+                ?ERROR(_) -> {InnerItem, InnerState};
+                ?LAST(InnerValue) -> {?LAST(InnerValue), InnerState};
+                ?NEXT(InnerValue) -> {?NEXT(InnerValue), maps:put(StRef, InnerProducer, InnerState)}
+            end;
+
+        (?COMPLETE, _State, NewState, StRef, undefined) ->
+            process_remaining_producers([], NewState, StRef);
+
+        (?NEXT(Value), State, NewState, StRef, InnerProducer) ->
+            {InnerItem, InnerState} = apply(InnerProducer, [NewState]),
+            case InnerItem of
+                ?COMPLETE -> {?IGNORE, InnerState};
+                ?ERROR(_) -> {InnerItem, InnerState};
+                ?LAST(InnerValue) -> {?NEXT(InnerValue), InnerState};
+                ?NEXT(InnerValue) -> {?NEXT(InnerValue), maps:put(StRef, InnerProducer, InnerState)}
+            end
+        end
+
     )
     ?default_operator(
         fun(?NEXT(Value), State, NewState, StRef) ->
