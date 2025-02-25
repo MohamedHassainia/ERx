@@ -5,6 +5,7 @@
 -export([create/1,
          from_list/1,
          from_value/1,
+         value/1,
          zip2/2,
          zip/1,
          merge/1,
@@ -136,6 +137,14 @@ zip(Observables) ->
     ?observable(State,
             apply_observables_and_zip_items(lists:reverse(Observables), [], State)
     ).
+
+%%--------------------------------------------------------------------
+-spec value(Value :: A) -> observable:t(A, ErrorInfo)
+     when A :: any(),
+          ErrorInfo :: any().
+%%--------------------------------------------------------------------
+value(Value) ->
+    ?stateless_observable(?LAST(Value)).
 
 %%--------------------------------------------------------------------    
 -spec apply_observables_and_zip_items(Observables, Result, State) -> {observable_item:t(list(), ErrorInfo), state()} when

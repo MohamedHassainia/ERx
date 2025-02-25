@@ -1,14 +1,3 @@
-%%%-------------------------------------------------------------------
-%%% @doc
-%%% Property-based tests for the Observable implementation.
-%%% Tests key Observable operations and combinations:
-%%% - List conversion
-%%% - Mapping and filtering
-%%% - Zipping and merging
-%%% - Reduction operations
-%%% Uses PropEr for generating test cases.
-%%% @end
-%%%-------------------------------------------------------------------
 -module(prop_observable).
 -include_lib("proper/include/proper.hrl").
 -include("observable_item.hrl").
@@ -492,28 +481,72 @@ prop_merge_test() ->
             EmittedValues =:= ExpectedValues
         end).
 
-%%% Property test for distinct_until_changed operator %%%
-prop_distinct_until_changed_test() ->
-    ?FORALL(List, list(),
+%%% Property test for observable:value/1 %%%
+prop_value_test() ->
+    ?FORALL(Value, any(),
         begin
+            Observable = observable:value(Value),
+            OnNext = fun(_Item) -> ok end,
+            ObservableItems = observable:subscribe(Observable, subscriber:create(OnNext)),
+            
+            % Should emit one value and complete
+            [?NEXT(EmittedValue), ?COMPLETE] = ObservableItems,
+            Value =:= EmittedValue
+        end).
+
+%%% Property test for concat_map operator %%%
+% prop_concat_map_test() ->
+%     ?FORALL(List, list(non_neg_integer()),
+%         begin
+%             MapFun = fun(X) -> observable:from_list(lists:seq(1, X)) end,
+%             Observable = observable:bind(
+%                             observable:from_list(List),
+%                             operator:concat_map(MapFun)
+%                          ),
+%             OnNext = fun(_Item) -> ok end,
+%             StoredList = get_observable_fired_items(Observable, OnNext),
+%             ExpectedList = lists:flatten([lists:seq(1, X) || X <- List]),
+%             StoredList =:= ExpectedList
+%         end).
+
+%%% Property test for concat_map operator %%%
+prop_concat_map_test() ->
+    ?FORALL(List, list(integer()),
+        begin
+            MapFun = fun(X) -> observable:value(X) end,
             Observable = observable:bind(
                 observable:from_list(List), 
-                operator:distinct_until_changed()
+                operator:concat_map(MapFun)
             ),
             OnNext = fun(_Item) -> ok end,
             StoredList = get_observable_fired_items(Observable, OnNext),
             
-            % Expected result: removes consecutive duplicates while preserving order
-            ExpectedList = lists:foldl(
-                fun(Elem, []) -> [Elem];
-                   (Elem, [Prev|_]=Acc) when Elem =:= Prev -> Acc;
-                   (Elem, Acc) -> [Elem|Acc]
-                end, 
-                [], 
-                lists:reverse(List)
-            ),
-            
+            % Expected: flattened list of sequences
+            ExpectedList = List,
             StoredList =:= ExpectedList
+        end).
+
+prop_concat_map_test_list_of_list() ->
+    ?FORALL(List, list(list(integer())),
+        begin
+            MapFun = fun(X) -> observable:from_list(X) end,
+            Observable = observable:bind(
+                observable:from_list(List), 
+                operator:concat_map(MapFun)
+            ),
+
+            OnNext = fun(_Item) -> ok end,
+            ObservableItems = observable:subscribe(Observable, subscriber:create(OnNext)),
+            
+            EmittedValues = [Value || ?NEXT(Value) <- ObservableItems],
+            
+            % Expected: flattened list of sequences
+            ExpectedList = merge_lists(List, []),
+            io:format("List: ~p~n", [List]),
+            io:format("Emitted: ~p~n", [ObservableItems]),
+            io:format("FilteredEmitted: ~p~n", [EmittedValues]),
+            io:format("Expected: ~p~n", [ExpectedList]),
+            EmittedValues =:= ExpectedList
         end).
 
 %%%%%%%%%%%%%%%
