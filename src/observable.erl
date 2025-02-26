@@ -11,7 +11,9 @@
          merge/1,
          bind/2,
          pipe/2,
-         subscribe/2]).
+         subscribe/2,
+         interval/1,
+         timer/1]).
 
 -export_type([t/2,
               state/0,
@@ -293,3 +295,38 @@ run(#observable{item_producer = ItemProducer, subscribers = Subscribers} = Obser
         ?IGNORE             ->
             [?IGNORE | run(ObservableA, NewState)]
     end.
+    
+%%--------------------------------------------------------------------
+%% @doc Creates an observable that emits incremental integers every interval
+%% @end
+%%--------------------------------------------------------------------
+-spec interval(Interval :: pos_integer()) -> t(non_neg_integer(), any()).
+interval(Interval) ->
+    Producer = fun(State) ->
+        Counter = maps:get(counter, State, 0),
+        {?NEXT(Counter), State#{counter => Counter + 1}}
+    end,
+    create_server_observable(Producer, Interval).
+
+%%--------------------------------------------------------------------
+%% @doc Creates an observable that emits a single value after delay
+%% @end
+%%--------------------------------------------------------------------
+-spec timer(Delay :: pos_integer()) -> t(integer(), any()).
+timer(Delay) ->
+    Producer = fun(_State) -> {?LAST(0), #{}} end,
+    create_server_observable(Producer, Delay).
+
+%%--------------------------------------------------------------------
+%% Internal functions for server-based observables
+%%--------------------------------------------------------------------
+create_server_observable(Producer, Interval) ->
+    create(fun(State) ->
+        case maps:get(server_pid, State, undefined) of
+            undefined ->
+                {ok, Pid} = observable_server:start_link(Producer, Interval),
+                {?IGNORE, State#{server_pid => Pid}};
+            _Pid ->
+                {?IGNORE, State}
+        end
+    end).
