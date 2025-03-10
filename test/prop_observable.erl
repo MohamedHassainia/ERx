@@ -542,10 +542,6 @@ prop_concat_map_test_list_of_list() ->
             
             % Expected: flattened list of sequences
             ExpectedList = merge_lists(List, []),
-            io:format("List: ~p~n", [List]),
-            io:format("Emitted: ~p~n", [ObservableItems]),
-            io:format("FilteredEmitted: ~p~n", [EmittedValues]),
-            io:format("Expected: ~p~n", [ExpectedList]),
             EmittedValues =:= ExpectedList
         end).
 

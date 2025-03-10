@@ -11,9 +11,7 @@
          merge/1,
          bind/2,
          pipe/2,
-         subscribe/2,
-         interval/1,
-         timer/1]).
+         subscribe/2]).
 
 -export_type([t/2,
               state/0,
@@ -25,6 +23,7 @@
 -include("observable_item.hrl").
 -include("subscriber.hrl").
 -include("observable.hrl").
+-include("observable_server.hrl").
 
 -define(observable(State, StRef, ObDef),
     Ref = erlang:unique_integer(),
@@ -64,8 +63,9 @@ create(ItemProducer) ->
                  B :: any(),
                  ErrorInfo :: any().
 %%--------------------------------------------------------------------
-bind(ObservableA, Operator) ->
-    apply(Operator, [ObservableA#observable.item_producer]).
+bind(#observable{async = AsyncA} = ObservableA, Operator) ->
+    #observable{async = AsyncB} = ObservableB = apply(Operator, [ObservableA#observable.item_producer]),
+    ObservableB#observable{async = AsyncA orelse AsyncB}.
 
 %%--------------------------------------------------------------------
 -spec subscribe(ObservableA, Subscribers) -> any() 
@@ -118,12 +118,13 @@ from_value(Value) ->
          ErrorInfo :: any().
 
 %% TODO fix this observable
-zip2(#observable{item_producer = ItemProducerA} = _ObservableA,
-     #observable{item_producer = ItemProducerB} = _ObservableB) ->
+zip2(ObservableA, ObservableB) ->
+    ObservableAStRef = erlang:unique_integer(),
+    ObservableBStRef = erlang:unique_integer(),
     ?observable(State,
         begin
-            {ItemA, NewStateA} = apply(ItemProducerA, [State]),
-            {ItemB, NewStateB} = apply(ItemProducerB, [State]),
+            {ItemA, NewStateA} = apply_observable(ObservableA, State, ObservableAStRef),
+            {ItemB, NewStateB} = apply_observable(ObservableB, State, ObservableBStRef),
             NewState = maps:merge(NewStateA, NewStateB),
             {{ItemA, ItemB}, NewState}
         end      
@@ -183,9 +184,10 @@ apply_observables_and_zip_items([Observable | Observables], Result, State) ->
 merge([]) ->
     ?stateless_observable(?COMPLETE);
 merge(Observables) when is_list(Observables) ->
+    ObservablesWithRefs = lists:map(fun(O) -> {erlang:unique_integer(), O} end, Observables),
     ?observable(State, Ref,
         begin
-            Obs = maps:get(Ref, State, Observables),
+            Obs = maps:get(Ref, State, ObservablesWithRefs),
             merge_observables(Ref, Obs, State)
         end
     ).
@@ -201,8 +203,8 @@ merge(Observables) when is_list(Observables) ->
 %%--------------------------------------------------------------------
 merge_observables(_Ref, [], State) ->
     {?COMPLETE, State};
-merge_observables(Ref, [Observable | Obs], State) ->
-    {Item, NewState} = apply_observable(Observable, State),
+merge_observables(Ref, [{StRef, Observable} | Obs], State) ->
+    {Item, NewState} = apply_observable(Observable, State, StRef),
     case {Item, Obs} of
         {?ERROR(_ErrorInfo), _} ->
             {Item, maps:put(Ref, Obs, NewState)};
@@ -211,7 +213,7 @@ merge_observables(Ref, [Observable | Obs], State) ->
         {?COMPLETE, _} ->
             merge_observables(Ref, Obs, State);
         {Item, _} ->
-            {Item, maps:put(Ref, Obs ++ [Observable], NewState)}
+            {Item, maps:put(Ref, Obs ++ [{StRef, Observable}], NewState)}
     end.
 
 %%--------------------------------------------------------------------
@@ -232,14 +234,41 @@ pipe(Observable, Operators) ->
 %%%===================================================================
 
 %%--------------------------------------------------------------------
--spec apply_observable(observable:t(A, ErrorInfo), State) -> {Item, State} when
-    Item :: observable_item:t(A, ErrorInfo),
+-spec apply_observable(observable:t(A, ErrorInfo), State, StRef) -> {Item, State} when
+    Item  :: observable_item:t(A, ErrorInfo),
+    StRef :: integer(),
     State :: state(),
     A :: any(),
     ErrorInfo :: any().
 %%--------------------------------------------------------------------
-apply_observable(#observable{item_producer = ItemProducer}, State) ->
+apply_observable(#observable{async = Async} = Observable, State, StRef) 
+  when Async == true ->
+    case maps:get(StRef, State, undefined) of
+        undefined -> 
+            {ok, ServerPid} = start_observable_server(Observable),
+            Item = observable_server:process_item(ServerPid),
+            {Item, maps:put(StRef, ServerPid, State)};
+        ServerPid -> 
+            {observable_server:process_item(ServerPid), State}
+    end;
+apply_observable(#observable{item_producer = ItemProducer, async = Async}, State, _StRef) 
+  when Async == false ->
     apply(ItemProducer, [State]).
+
+start_observable_server(Observable) ->
+    start_observable_server(Observable, #{}).
+
+start_observable_server(#observable{item_producer = ItemProducer, async = true
+                                    % gen_server_options = #gen_server_options{timeout = Timeout,
+                                    %                                          buffer_size= BufferSize}
+                                                                            },
+                        InnerState) ->
+    IinitFun = fun() ->
+                State = #state{queue = [], buffer_size = 10000,
+                               item_producer = ItemProducer, inner_state = InnerState},
+                {ok, State, 10000}
+               end,
+    observable_server:start_link(IinitFun).
 
 %%--------------------------------------------------------------------
 -spec broadcast_item(CallbackFunName, Args, Subscribers) -> list() when
@@ -295,38 +324,3 @@ run(#observable{item_producer = ItemProducer, subscribers = Subscribers} = Obser
         ?IGNORE             ->
             [?IGNORE | run(ObservableA, NewState)]
     end.
-    
-%%--------------------------------------------------------------------
-%% @doc Creates an observable that emits incremental integers every interval
-%% @end
-%%--------------------------------------------------------------------
--spec interval(Interval :: pos_integer()) -> t(non_neg_integer(), any()).
-interval(Interval) ->
-    Producer = fun(State) ->
-        Counter = maps:get(counter, State, 0),
-        {?NEXT(Counter), State#{counter => Counter + 1}}
-    end,
-    create_server_observable(Producer, Interval).
-
-%%--------------------------------------------------------------------
-%% @doc Creates an observable that emits a single value after delay
-%% @end
-%%--------------------------------------------------------------------
--spec timer(Delay :: pos_integer()) -> t(integer(), any()).
-timer(Delay) ->
-    Producer = fun(_State) -> {?LAST(0), #{}} end,
-    create_server_observable(Producer, Delay).
-
-%%--------------------------------------------------------------------
-%% Internal functions for server-based observables
-%%--------------------------------------------------------------------
-create_server_observable(Producer, Interval) ->
-    create(fun(State) ->
-        case maps:get(server_pid, State, undefined) of
-            undefined ->
-                {ok, Pid} = observable_server:start_link(Producer, Interval),
-                {?IGNORE, State#{server_pid => Pid}};
-            _Pid ->
-                {?IGNORE, State}
-        end
-    end).

@@ -16,13 +16,16 @@
          reduce/1,
          distinct/0,
          distinct_until_changed/0,
-         concat_map/1]).
+         concat_map/1,
+         async/0, 
+         async/1]).
 
 %%%===================================================================
 %%% Includes, defines, types and records
 %%%===================================================================
 -include("observable_item.hrl").
 -include("observable.hrl").
+-include("observable_server.hrl").
 
 -type t(A, ErrorInfo, B) :: fun((observable:item_producer(A, ErrorInfo)) -> observable:t(B, ErrorInfo)).
 
@@ -441,6 +444,40 @@ concat_map(Mapper) ->
         end
     ).
 
+%%--------------------------------------------------------------------
+%% @doc Transforms an observable to run on a gen_server
+%% Uses default options
+%% @returns An operator that makes the observable run asynchronously
+%% @end
+%%--------------------------------------------------------------------
+-spec async() -> operator:t(A, ErrorInfo, A) when
+    A :: any(),
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+async() ->
+    async(#{}).
+
+%%--------------------------------------------------------------------
+%% @doc Transforms an observable to run on a gen_server with given options
+%% @param Options Configuration map for the async observable
+%% @returns An operator that makes the observable run asynchronously
+%% @end
+%%--------------------------------------------------------------------
+-spec async(Options) -> operator:t(A, ErrorInfo, A) when
+    Options :: #{
+        buffer_size => non_neg_integer(),
+        timeout => non_neg_integer() | infinity
+    },
+    A :: any(),
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+async(Options) ->
+    fun(ItemProducer) ->
+        #observable{item_producer = ItemProducer,
+                    async = true,
+                    gen_server_options = Options}
+    end.
+
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
@@ -518,3 +555,31 @@ drop_item(?LAST(Value), MustDropPred, State, MustDropRef) ->
     end;
 drop_item(Item, _MustDropPred, State, MustDropRef) ->
     {Item, maps:put(MustDropRef, true, State)}.
+
+%%%===================================================================
+%%% Internal functions for async operator
+%%%===================================================================
+
+create_server(Item, Options) ->
+    % Create a state for the server
+    BufferSize = maps:get(buffer_size, Options, 100),
+    InitFun = fun() ->
+        #state{
+            queue = [],
+            cast_handler = fun handle_async_cast/2,
+            item_producer = 
+                fun(State) ->
+                    {Item, State}
+                end
+        }
+    end,
+    
+    % Start the server process
+    {ok, Pid} = observable_server:start_link(InitFun),
+    {server_pid, Pid}.
+
+handle_async_cast({process_item, Item}, State) ->
+    % Process an item asynchronously
+    {noreply, State};
+handle_async_cast(_Request, State) ->
+    {noreply, State}.
