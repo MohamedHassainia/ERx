@@ -182,12 +182,19 @@ apply_observables_and_zip_items([Observable | Observables], Result, State) ->
     ErrorInfo :: any().
 %%--------------------------------------------------------------------
 merge([]) ->
+    erx_logger:debug("Merging empty list of observables - returning COMPLETE"),
     ?stateless_observable(?COMPLETE);
 merge(Observables) when is_list(Observables) ->
-    ObservablesWithRefs = lists:map(fun(O) -> {erlang:unique_integer(), O} end, Observables),
+    erx_logger:debug("Merging ~p observables", [length(Observables)]),
+    ObservablesWithRefs = lists:map(fun(O) -> 
+        Ref = erlang:unique_integer(),
+        erx_logger:debug("Assigned ref ~p to observable", [Ref]),
+        {Ref, O} 
+    end, Observables),
     ?observable(State, Ref,
         begin
             Obs = maps:get(Ref, State, ObservablesWithRefs),
+            erx_logger:debug("Processing merge with ~p observables in state", [length(Obs)]),
             merge_observables(Ref, Obs, State)
         end
     ).
@@ -202,17 +209,27 @@ merge(Observables) when is_list(Observables) ->
     ErrorInfo :: any().
 %%--------------------------------------------------------------------
 merge_observables(_Ref, [], State) ->
+    erx_logger:debug("All observables completed in merge"),
     {?COMPLETE, State};
 merge_observables(Ref, [{StRef, Observable} | Obs], State) ->
+    erx_logger:debug("Processing observable with ref ~p in merge", [StRef]),
     {Item, NewState} = apply_observable(Observable, State, StRef),
+    erx_logger:debug("Observable ~p produced item: ~p", [StRef, Item]),
     case {Item, Obs} of
-        {?ERROR(_ErrorInfo), _} ->
+        {?ERROR(ErrorInfo), _} ->
+            erx_logger:warn("Observable ~p produced error: ~p", [StRef, ErrorInfo]),
             {Item, maps:put(Ref, Obs, NewState)};
         {?COMPLETE, []} ->
+            erx_logger:debug("All observables completed, finishing merge"),
             {?COMPLETE, NewState};
         {?COMPLETE, _} ->
+            erx_logger:debug("Observable ~p completed, continuing with ~p more", [StRef, length(Obs)]),
             merge_observables(Ref, Obs, State);
+        {?NEXT(Value), _} ->
+            erx_logger:debug("Observable ~p emitted value: ~p", [StRef, Value]),
+            {Item, maps:put(Ref, Obs ++ [{StRef, Observable}], NewState)};
         {Item, _} ->
+            erx_logger:debug("Observable ~p emitted item: ~p", [StRef, Item]),
             {Item, maps:put(Ref, Obs ++ [{StRef, Observable}], NewState)}
     end.
 
@@ -245,15 +262,23 @@ apply_observable(#observable{async = Async} = Observable, State, StRef)
   when Async == true ->
     case maps:get(StRef, State, undefined) of
         undefined -> 
+            erx_logger:debug("Starting new server for async observable ~p", [StRef]),
             {ok, ServerPid} = start_observable_server(Observable),
             Item = observable_server:process_item(ServerPid),
+            erx_logger:debug("Async observable ~p emitted first item: ~p", [StRef, Item]),
             {Item, maps:put(StRef, ServerPid, State)};
         ServerPid -> 
-            {observable_server:process_item(ServerPid), State}
+            erx_logger:debug("Using existing server ~p for observable ~p", [ServerPid, StRef]),
+            Item = observable_server:process_item(ServerPid),
+            erx_logger:debug("Async observable ~p emitted item: ~p", [StRef, Item]),
+            {Item, State}
     end;
-apply_observable(#observable{item_producer = ItemProducer, async = Async}, State, _StRef) 
+apply_observable(#observable{item_producer = ItemProducer, async = Async}, State, StRef) 
   when Async == false ->
-    apply(ItemProducer, [State]).
+    erx_logger:debug("Applying sync observable ~p", [StRef]),
+    {Item, NewState} = apply(ItemProducer, [State]),
+    erx_logger:debug("Sync observable ~p produced: ~p", [StRef, Item]),
+    {Item, NewState}.
 
 start_observable_server(Observable) ->
     start_observable_server(Observable, #{}).

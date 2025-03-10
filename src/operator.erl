@@ -15,17 +15,13 @@
          product/0,
          reduce/1,
          distinct/0,
-         distinct_until_changed/0,
-         concat_map/1,
-         async/0, 
-         async/1]).
+         distinct_until_changed/0]).
 
 %%%===================================================================
 %%% Includes, defines, types and records
 %%%===================================================================
 -include("observable_item.hrl").
 -include("observable.hrl").
--include("observable_server.hrl").
 
 -type t(A, ErrorInfo, B) :: fun((observable:item_producer(A, ErrorInfo)) -> observable:t(B, ErrorInfo)).
 
@@ -381,8 +377,7 @@ distinct() ->
         fun(?NEXT(Value), State, NewState, StRef) ->
             SeenValues = maps:get(StRef, State, sets:new()),
             case sets:is_element(Value, SeenValues) of 
-                true ->
-                    {?IGNORE, NewState};
+                true -> {?IGNORE, NewState};
                 false -> 
                     NewSeenValues = sets:add_element(Value, SeenValues),
                     {?NEXT(Value), maps:put(StRef, NewSeenValues, NewState)}
@@ -390,8 +385,7 @@ distinct() ->
         (?LAST(Value), State, NewState, StRef) ->
             SeenValues = maps:get(StRef, State, sets:new()),
             case sets:is_element(Value, SeenValues) of 
-                true -> 
-                    {?COMPLETE, NewState};
+                true -> {?COMPLETE, NewState};
                 false -> 
                     NewSeenValues = sets:add_element(Value, SeenValues),
                     {?LAST(Value), maps:put(StRef, NewSeenValues, NewState)}
@@ -430,109 +424,16 @@ distinct_until_changed() ->
     ).
 
 
-concat_map(Mapper) ->
-    ?default_operator(
-        fun({Action, Value}, _State, NewState, StRef)
-          when Action == next orelse Action == last ->
-            InnerObservable = Mapper(Value),
-            process_inner_observable(InnerObservable, NewState, StRef);
-        (?COMPLETE, _State, NewState, StRef) ->
-            InnerObservables = maps:get(StRef, NewState, []),
-            process_inner_observables(StRef, InnerObservables, NewState);
-        (Item, _State, NewState, _StRef) ->
-            {Item, NewState}
-        end
-    ).
-
-%%--------------------------------------------------------------------
-%% @doc Transforms an observable to run on a gen_server
-%% Uses default options
-%% @returns An operator that makes the observable run asynchronously
-%% @end
-%%--------------------------------------------------------------------
--spec async() -> operator:t(A, ErrorInfo, A) when
-    A :: any(),
-    ErrorInfo :: any().
-%%--------------------------------------------------------------------
-async() ->
-    async(#{}).
-
-%%--------------------------------------------------------------------
-%% @doc Transforms an observable to run on a gen_server with given options
-%% @param Options Configuration map for the async observable
-%% @returns An operator that makes the observable run asynchronously
-%% @end
-%%--------------------------------------------------------------------
--spec async(Options) -> operator:t(A, ErrorInfo, A) when
-    Options :: #{
-        buffer_size => non_neg_integer(),
-        timeout => non_neg_integer() | infinity
-    },
-    A :: any(),
-    ErrorInfo :: any().
-%%--------------------------------------------------------------------
-async(Options) ->
-    fun(ItemProducer) ->
-        #observable{item_producer = ItemProducer,
-                    async = true,
-                    gen_server_options = Options}
-    end.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
-%%--------------------------------------------------------------------
--spec process_inner_observable(Observable, State, StRef) -> {observable_item:t(A, ErrorInfo), map()} when
-    Observable :: #observable{},
-    A :: any(),
-    ErrorInfo :: any(),
-    State :: map(),
-    StRef :: integer().
-%%--------------------------------------------------------------------
-process_inner_observable(#observable{item_producer = ItemProducer} = Observable, State, StRef) ->
-    {Item, NewState} = apply(ItemProducer, [State]),
-    case Item of
-        ?NEXT(Value) -> {?NEXT(Value), add_inner_observable(StRef, Observable, NewState)};
-        ?LAST(Value) -> {?NEXT(Value), NewState};
-        ?COMPLETE    -> {?IGNORE, NewState};
-        Item         -> {Item, NewState}
-    end.
-
-%%--------------------------------------------------------------------
--spec process_inner_observables(StRef, [Observable], State) -> {observable_item:t(A, ErrorInfo), map()} when
-    StRef :: integer(),
-    Observable :: #observable{},
-    A :: any(),
-    ErrorInfo :: any(),
-    State :: map().
-%%--------------------------------------------------------------------
-process_inner_observables(_StRef, [], State) ->
-    {?COMPLETE, State};
-process_inner_observables(StRef, [#observable{item_producer = ItemProducer} = Observable | Rest], State) ->
-    {Item, NewState} = apply(ItemProducer, [State]),
-    case {Item, Rest} of
-        {?COMPLETE, []}   -> {?COMPLETE, NewState};
-        {?COMPLETE, _}    -> process_inner_observables(StRef, Rest, NewState);
-        {?LAST(Value), _} -> {?NEXT(Value), NewState};
-        {?NEXT(Value), _} -> {?NEXT(Value), maps:put(StRef, Rest ++ [Observable], NewState)};
-        {Item, _}         -> {Item, NewState}
-    end.
-
-%%--------------------------------------------------------------------
--spec add_inner_observable(StRef, Observable, State) -> map() when
-    StRef :: integer(),
-    Observable :: #observable{},
-    State :: map().
-%%--------------------------------------------------------------------
-add_inner_observable(StRef, Observable, State) ->
-    InnerObservables = maps:get(StRef, State, []),
-    NewInnerObservables = InnerObservables ++ [Observable],
-    maps:put(StRef, NewInnerObservables, State).
 
 %%--------------------------------------------------------------------
 -spec drop_item(Item, MustDropPred, State, MustDropRef) -> {observable_item:t(A, ErrorInfo), map()} when
     Item :: observable_item:t(A, ErrorInfo),
+    
     A :: any(),
     ErrorInfo :: any(),
     MustDropPred :: fun((A) -> boolean()),
@@ -555,31 +456,3 @@ drop_item(?LAST(Value), MustDropPred, State, MustDropRef) ->
     end;
 drop_item(Item, _MustDropPred, State, MustDropRef) ->
     {Item, maps:put(MustDropRef, true, State)}.
-
-%%%===================================================================
-%%% Internal functions for async operator
-%%%===================================================================
-
-create_server(Item, Options) ->
-    % Create a state for the server
-    BufferSize = maps:get(buffer_size, Options, 100),
-    InitFun = fun() ->
-        #state{
-            queue = [],
-            cast_handler = fun handle_async_cast/2,
-            item_producer = 
-                fun(State) ->
-                    {Item, State}
-                end
-        }
-    end,
-    
-    % Start the server process
-    {ok, Pid} = observable_server:start_link(InitFun),
-    {server_pid, Pid}.
-
-handle_async_cast({process_item, Item}, State) ->
-    % Process an item asynchronously
-    {noreply, State};
-handle_async_cast(_Request, State) ->
-    {noreply, State}.
