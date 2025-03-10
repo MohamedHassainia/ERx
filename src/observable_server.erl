@@ -54,7 +54,7 @@ process_item(ServerPid) ->
 %%====================================================================
 
 init(InitFun) ->
-    {ok, apply(InitFun, [])}.
+    apply(InitFun, []).
 
 handle_call(process_item, _From, State = #state{queue = []}) ->
     {reply, ignore, State};
@@ -66,13 +66,13 @@ handle_call(process_item, _From, State = #state{item_producer = ItemProducer, in
     NewState = State#state{inner_state = NewInnerState},
     case Item of
         ?NEXT(Value) ->
-            {reply, Value, NewState};
+            {reply, ?NEXT(Value), NewState};
         ?IGNORE ->
             {reply, ?IGNORE, NewState};
         ?LAST(Value) ->
-            {stop, last, Value, NewState};
+            {stop, ?LAST(Value), NewState};
         ?ERROR(Error) ->
-            {stop, error, Error, NewState};
+            {stop, ?ERROR(Error), NewState};
         ?COMPLETE->
             {stop, ?COMPLETE, NewState}
     end;
