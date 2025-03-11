@@ -289,9 +289,8 @@ start_observable_server(#observable{item_producer = ItemProducer, async = true
                                                                             },
                         InnerState) ->
     IinitFun = fun() ->
-                State = #state{queue = [], buffer_size = 10000,
-                               item_producer = ItemProducer, inner_state = InnerState},
-                {ok, State, 2000}
+                #state{queue = [], buffer_size = 10000,
+                       item_producer = ItemProducer, inner_state = InnerState}
                end,
     observable_server:start_link(IinitFun).
 

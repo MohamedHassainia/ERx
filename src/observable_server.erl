@@ -54,12 +54,13 @@ process_item(ServerPid) ->
 %%====================================================================
 
 init(InitFun) ->
-    apply(InitFun, []).
+    State = apply(InitFun, []),
+    {ok, State}.
 
-handle_call(process_item, _From, State = #state{queue = []}) ->
-    {reply, ignore, State};
-handle_call(process_item, _From, State = #state{queue = [Value|Rest]}) ->
-    {reply, Value, State#state{queue = Rest}};
+% handle_call(process_item, _From, State = #state{queue = []}) ->
+%     {reply, ignore, State};
+% handle_call(process_item, _From, State = #state{queue = [Value|Rest]}) ->
+%     {reply, Value, State#state{queue = Rest}};
 
 handle_call(process_item, _From, State = #state{item_producer = ItemProducer, inner_state = InnerState}) ->
     {Item, NewInnerState} = apply(ItemProducer, [InnerState]),
@@ -70,16 +71,16 @@ handle_call(process_item, _From, State = #state{item_producer = ItemProducer, in
         ?IGNORE ->
             {reply, ?IGNORE, NewState};
         ?LAST(Value) ->
-            {stop, ?LAST(Value), NewState};
+            {stop, normal, ?LAST(Value), NewState};  % Fixed format
         ?ERROR(Error) ->
-            {stop, ?ERROR(Error), NewState};
+            {stop, error, ?ERROR(Error), NewState};  % Fixed format
         ?COMPLETE->
-            {stop, ?COMPLETE, NewState}
-    end;
+            {stop, normal, ?COMPLETE, NewState}      % Fixed format
+    end.
 
-handle_call({process_item, Item}, _From, State = #state{item_producer = Producer, inner_state = InnerState}) ->
-    {ResultItem, NewInnerState} = Producer(Item, InnerState),
-    {reply, ResultItem, State#state{inner_state = NewInnerState}}.
+% handle_call({process_item, Item}, _From, State = #state{item_producer = Producer, inner_state = InnerState}) ->
+%     {ResultItem, NewInnerState} = Producer(Item, InnerState),
+%     {reply, ResultItem, State#state{inner_state = NewInnerState}}.
 
 % handle_call(_Request, _From, State) ->
 %     {reply, ok, State}.
