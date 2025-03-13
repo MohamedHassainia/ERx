@@ -80,6 +80,7 @@ subscribe(ObservableA, Subscribers) when is_list(Subscribers) ->
     ObservableWithSubs = ObservableA#observable{subscribers = Subscribers},
     run(ObservableWithSubs).
 
+    
 %%--------------------------------------------------------------------
 -spec from_list(List :: list(A)) -> observable:t(A, ErrorInfo)
     when A :: any(),
@@ -137,8 +138,12 @@ zip2(ObservableA, ObservableB) ->
          ErrorInfo :: any().
 
 zip(Observables) ->
+    ObservablesWithRefs = lists:map(fun(O) -> 
+        Ref = erlang:unique_integer(),
+        {Ref, O} 
+    end, Observables),
     ?observable(State,
-            apply_observables_and_zip_items(lists:reverse(Observables), [], State)
+            apply_observables_and_zip_items(lists:reverse(ObservablesWithRefs), [], State)
     ).
 
 %%--------------------------------------------------------------------
@@ -159,10 +164,9 @@ value(Value) ->
 %%--------------------------------------------------------------------
 apply_observables_and_zip_items([], Result, State) ->
     {?NEXT(Result), State};
-apply_observables_and_zip_items([Observable | Observables], Result, State) ->
-    #observable{item_producer = ItemProducer} = Observable,
-    
-     case apply(ItemProducer, [State]) of
+apply_observables_and_zip_items([{StRef, Observable} | Observables], Result, State) ->
+
+    case apply_observable(Observable, State, StRef) of
         {?IGNORE, NewState} -> 
             MergedNewState = maps:merge(State, NewState),
             apply_observables_and_zip_items(Observables, Result, MergedNewState);
@@ -294,24 +298,26 @@ broadcast_item(CallbackFunName, Args, Subscribers) ->
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
 run(#observable{state = State} = ObservableA) ->
-    run(ObservableA, State).
+    StRef = erlang:unique_integer(),
+    run(ObservableA, State, StRef).
 
 %%--------------------------------------------------------------------
--spec run(ObservableA, State) -> list()
+-spec run(ObservableA, State, StRef) -> list()
     when ObservableA :: observable:t(A, ErrorInfo),
          State :: map(),
+         StRef :: integer(),
          A :: any(),
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
 % run(#observable{subscribers = Subscribers}, #{is_completed := true}) ->
 %     broadcast_item(?ON_COMPLETE, [], Subscribers),
 %     [?COMPLETE];
-run(#observable{item_producer = ItemProducer, subscribers = Subscribers} = ObservableA, State) ->
-    {Item, NewState} = apply(ItemProducer, [State]),
+run(#observable{subscribers = Subscribers} = ObservableA, State, StRef) ->
+    {Item, NewState} = apply_observable(ObservableA, State, StRef),
     case Item of
         ?NEXT(Value)      ->
             broadcast_item(?ON_NEXT, [Value], Subscribers),
-            [Item | run(ObservableA, NewState)];
+            [Item | run(ObservableA, NewState, StRef)];
         ?LAST(Value)      ->
             broadcast_item(?ON_NEXT, [Value], Subscribers),
             broadcast_item(?ON_COMPLETE, [], Subscribers),
@@ -323,7 +329,7 @@ run(#observable{item_producer = ItemProducer, subscribers = Subscribers} = Obser
             broadcast_item(?ON_COMPLETE, [], Subscribers),
             [?COMPLETE];
         ?HALT              -> 
-            [?HALT | run(ObservableA, NewState)];
+            [?HALT | run(ObservableA, NewState, StRef)];
         ?IGNORE             ->
-            [?IGNORE | run(ObservableA, NewState)]
+            [?IGNORE | run(ObservableA, NewState, StRef)]
     end.
