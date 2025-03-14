@@ -105,17 +105,22 @@ observable:subscribe(AsyncObs, subscriber:create(
 ### Combining Streams
 
 ```erlang
-% Combining multiple sources with combineLatest
+% Combining multiple sources with zip
 Names = observable:from_list(["Alice", "Bob", "Charlie"]),
 Ages = observable:from_list([25, 30, 35]),
 
-Combined = observable:combineLatest([Names, Ages]),
+% Zip combines corresponding elements from each observable
+ZippedObs = observable:zip([Names, Ages]),
 
-observable:subscribe(Combined, subscriber:create(
+observable:subscribe(ZippedObs, subscriber:create(
     fun([Name, Age]) -> 
         io:format("~s is ~p years old~n", [Name, Age]) 
     end
 )).
+% Output:
+% Alice is 25 years old
+% Bob is 30 years old
+% Charlie is 35 years old
 ```
 
 ### Error Handling
