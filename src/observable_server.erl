@@ -6,17 +6,10 @@
 
 -include("observable_server.hrl").
 -include("observable_item.hrl").
--include("subscriber.hrl").
 
 %%====================================================================
 %% API functions
 %%====================================================================
-
-% start_link(ItemProducer) ->
-%     gen_server:start_link(?MODULE, {ItemProducer, undefined}, []).
-
-% start_link(ItemProducer, Interval) when is_integer(Interval), Interval > 0 ->
-%     gen_server:start_link(?MODULE, {ItemProducer, Interval}, []).
 
 start_link(InitFun) ->
     gen_server:start_link(?MODULE, InitFun, []).
@@ -57,11 +50,6 @@ init(InitFun) ->
     State = apply(InitFun, []),
     {ok, State}.
 
-% handle_call(process_item, _From, State = #state{queue = []}) ->
-%     {reply, ignore, State};
-% handle_call(process_item, _From, State = #state{queue = [Value|Rest]}) ->
-%     {reply, Value, State#state{queue = Rest}};
-
 handle_call(process_item, _From, State = #state{item_producer = ItemProducer, inner_state = InnerState}) ->
     {Item, NewInnerState} = apply(ItemProducer, [InnerState]),
     NewState = State#state{inner_state = NewInnerState},
@@ -70,20 +58,16 @@ handle_call(process_item, _From, State = #state{item_producer = ItemProducer, in
             {reply, ?NEXT(Value), NewState};
         ?IGNORE ->
             {reply, ?IGNORE, NewState};
+        ?HALT ->
+            {reply, ?HALT, NewState};
         ?LAST(Value) ->
-            {stop, normal, ?LAST(Value), NewState};  % Fixed format
+            {stop, normal, ?LAST(Value), NewState};
         ?ERROR(Error) ->
-            {stop, error, ?ERROR(Error), NewState};  % Fixed format
+            {stop, error, ?ERROR(Error), NewState};
         ?COMPLETE->
-            {stop, normal, ?COMPLETE, NewState}      % Fixed format
+            {stop, normal, ?COMPLETE, NewState}
     end.
 
-% handle_call({process_item, Item}, _From, State = #state{item_producer = Producer, inner_state = InnerState}) ->
-%     {ResultItem, NewInnerState} = Producer(Item, InnerState),
-%     {reply, ResultItem, State#state{inner_state = NewInnerState}}.
-
-% handle_call(_Request, _From, State) ->
-%     {reply, ok, State}.
 
 handle_cast({subscribe, Subscriber}, State = #state{subscribers = Subs}) ->
     {noreply, State#state{subscribers = [Subscriber|Subs]}};
@@ -102,24 +86,6 @@ handle_cast(Requst, #state{cast_handler = CastHandler} = State) ->
         {stop, Reason, NewState} -> {stop, Reason, NewState}
     end.
 
-% handle_info(emit, State = #state{item_producer = Producer, inner_state = InnerState, subscribers = Subs}) ->
-%     case apply(Producer, [InnerState]) of
-%         {?NEXT(Value), NewInnerState} ->
-%             broadcast_to_subscribers(?ON_NEXT, [Value], Subs),
-%             {noreply, schedule_next(State#state{inner_state = NewInnerState})};
-%         {?LAST(Value), NewInnerState} ->
-%             broadcast_to_subscribers(?ON_NEXT, [Value], Subs),
-%             broadcast_to_subscribers(?ON_COMPLETE, [], Subs),
-%             {stop, normal, State#state{inner_state = NewInnerState}};
-%         {?ERROR(Error), NewInnerState} ->
-%             broadcast_to_subscribers(?ON_ERROR, [Error], Subs),
-%             {stop, normal, State#state{inner_state = NewInnerState}};
-%         {?COMPLETE, NewInnerState} ->
-%             broadcast_to_subscribers(?ON_COMPLETE, [], Subs),
-%             {stop, normal, State#state{inner_state = NewInnerState}};
-%         {?IGNORE, NewInnerState} ->
-%             {noreply, schedule_next(State#state{inner_state = NewInnerState})}
-%     end;
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -135,21 +101,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal functions
 %%====================================================================
 
-schedule_next(State = #state{interval = undefined}) ->
-    self() ! emit,
-    State;
-schedule_next(State = #state{interval = Interval, timer_ref = OldTimer}) ->
-    cancel_timer(OldTimer),
-    TimerRef = erlang:send_after(Interval, self(), emit),
-    State#state{timer_ref = TimerRef}.
-
 cancel_timer(undefined) -> ok;
 cancel_timer(TimerRef) -> erlang:cancel_timer(TimerRef).
 
-broadcast_to_subscribers(CallbackType, Args, Subscribers) ->
-    lists:foreach(fun(Sub) ->
-        case subscriber:get_callback_function(CallbackType, Sub) of
-            undefined -> ok;
-            Callback -> apply(Callback, Args)
-        end
-    end, Subscribers).
+

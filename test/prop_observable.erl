@@ -495,21 +495,6 @@ prop_value_test() ->
         end).
 
 %%% Property test for concat_map operator %%%
-% prop_concat_map_test() ->
-%     ?FORALL(List, list(non_neg_integer()),
-%         begin
-%             MapFun = fun(X) -> observable:from_list(lists:seq(1, X)) end,
-%             Observable = observable:bind(
-%                             observable:from_list(List),
-%                             operator:concat_map(MapFun)
-%                          ),
-%             OnNext = fun(_Item) -> ok end,
-%             StoredList = get_observable_fired_items(Observable, OnNext),
-%             ExpectedList = lists:flatten([lists:seq(1, X) || X <- List]),
-%             StoredList =:= ExpectedList
-%         end).
-
-%%% Property test for concat_map operator %%%
 prop_concat_map_test() ->
     ?FORALL(List, list(integer()),
         begin

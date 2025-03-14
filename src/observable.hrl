@@ -14,6 +14,7 @@
     item_producer                              :: item_producer(any(), any()),
     subscribers = []                           :: list(subscriber:t(any(), any())),
     async = false                              :: boolean(),
+    ref                                        :: integer() | undefined,
     gen_server_options = #gen_server_options{} :: #gen_server_options{},
     pid                                        :: undefined | pid()
 }).
@@ -23,6 +24,7 @@
     item_producer      :: item_producer(A, ErrorInfo),
     subscribers        :: list(subscriber:t(A, ErrorInfo)),
     async              :: boolean(),
+    ref                :: integer() | undefined,
     gen_server_options :: #gen_server_options{},
     pid                :: undefined | pid()
 }.

@@ -556,30 +556,3 @@ drop_item(?LAST(Value), MustDropPred, State, MustDropRef) ->
 drop_item(Item, _MustDropPred, State, MustDropRef) ->
     {Item, maps:put(MustDropRef, true, State)}.
 
-%%%===================================================================
-%%% Internal functions for async operator
-%%%===================================================================
-
-create_server(Item, Options) ->
-    % Create a state for the server
-    BufferSize = maps:get(buffer_size, Options, 100),
-    InitFun = fun() ->
-        #state{
-            queue = [],
-            cast_handler = fun handle_async_cast/2,
-            item_producer = 
-                fun(State) ->
-                    {Item, State}
-                end
-        }
-    end,
-    
-    % Start the server process
-    {ok, Pid} = observable_server:start_link(InitFun),
-    {server_pid, Pid}.
-
-handle_async_cast({process_item, Item}, State) ->
-    % Process an item asynchronously
-    {noreply, State};
-handle_async_cast(_Request, State) ->
-    {noreply, State}.

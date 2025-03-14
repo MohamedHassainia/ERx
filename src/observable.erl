@@ -8,7 +8,9 @@
          value/1,
          zip2/2,
          zip/1,
-         merge/1,
+         merge/1]).
+
+-export([run/1,
          bind/2,
          pipe/2,
          subscribe/2]).
@@ -63,9 +65,10 @@ create(ItemProducer) ->
                  B :: any(),
                  ErrorInfo :: any().
 %%--------------------------------------------------------------------
-bind(#observable{async = AsyncA} = ObservableA, Operator) ->
+bind(#observable{async = AsyncA, ref = Ref} = ObservableA, Operator) ->
     #observable{async = AsyncB} = ObservableB = apply(Operator, [ObservableA#observable.item_producer]),
-    ObservableB#observable{async = AsyncA orelse AsyncB}.
+    ObservableB#observable{async = AsyncA orelse AsyncB,
+                           ref   = Ref}.
 
 %%--------------------------------------------------------------------
 -spec subscribe(ObservableA, Subscribers) -> any() 
@@ -118,7 +121,6 @@ from_value(Value) ->
          B :: any(),
          ErrorInfo :: any().
 
-%% TODO fix this observable
 zip2(ObservableA, ObservableB) ->
     ObservableAStRef = erlang:unique_integer(),
     ObservableBStRef = erlang:unique_integer(),
@@ -175,8 +177,8 @@ apply_observables_and_zip_items([{StRef, Observable} | Observables], Result, Sta
             apply_observables_and_zip_items(Observables, [Item|Result], MergedNewState);
         {?ERROR(ErrorInfo), NewState} ->
             {?ERROR(ErrorInfo), maps:merge(State, NewState)};
-        {?COMPLETE, NewState} ->
-            {?COMPLETE, maps:merge(State, NewState)}
+        {Item, NewState} ->
+            {Item, maps:merge(State, NewState)}
     end.
 
 %%--------------------------------------------------------------------
@@ -266,10 +268,7 @@ apply_observable(#observable{item_producer = ItemProducer, async = Async}, State
 start_observable_server(Observable) ->
     start_observable_server(Observable, #{}).
 
-start_observable_server(#observable{item_producer = ItemProducer, async = true
-                                    % gen_server_options = #gen_server_options{timeout = Timeout,
-                                    %                                          buffer_size= BufferSize}
-                                                                            },
+start_observable_server(#observable{item_producer = ItemProducer, async = true},
                         InnerState) ->
     IinitFun = fun() ->
                 #state{queue = [], buffer_size = 10000,
@@ -297,9 +296,11 @@ broadcast_item(CallbackFunName, Args, Subscribers) ->
          A :: any(),
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
-run(#observable{state = State} = ObservableA) ->
+run(#observable{state = State, ref = undefined} = ObservableA) ->
     StRef = erlang:unique_integer(),
-    run(ObservableA, State, StRef).
+    run(ObservableA, State, StRef);
+run(#observable{state = State, ref = Ref} = Observable) ->
+    run(Observable, State, Ref).
 
 %%--------------------------------------------------------------------
 -spec run(ObservableA, State, StRef) -> list()
@@ -309,9 +310,6 @@ run(#observable{state = State} = ObservableA) ->
          A :: any(),
          ErrorInfo :: any().
 %%--------------------------------------------------------------------
-% run(#observable{subscribers = Subscribers}, #{is_completed := true}) ->
-%     broadcast_item(?ON_COMPLETE, [], Subscribers),
-%     [?COMPLETE];
 run(#observable{subscribers = Subscribers} = ObservableA, State, StRef) ->
     {Item, NewState} = apply_observable(ObservableA, State, StRef),
     case Item of
@@ -329,7 +327,7 @@ run(#observable{subscribers = Subscribers} = ObservableA, State, StRef) ->
             broadcast_item(?ON_COMPLETE, [], Subscribers),
             [?COMPLETE];
         ?HALT              -> 
-            [?HALT | run(ObservableA, NewState, StRef)];
+            [?HALT | observable_manager:halt_observable(ObservableA#observable{state = NewState}, StRef)];
         ?IGNORE             ->
             [?IGNORE | run(ObservableA, NewState, StRef)]
     end.
