@@ -108,9 +108,15 @@
 map(MapFun) ->
     ?stateless_operator(
         fun(?NEXT(Value)) ->
-            ?NEXT(MapFun(Value));
+            case safe_apply(MapFun, Value) of
+                ?ERROR(ErrorInfo) -> ?ERROR(ErrorInfo);
+                Result -> ?NEXT(Result)
+            end;
            (?LAST(Value)) ->
-            ?LAST(MapFun(Value));
+            case safe_apply(MapFun, Value) of
+                ?ERROR(ErrorInfo) -> ?ERROR(ErrorInfo);
+                Result -> ?LAST(Result)
+            end;
            (Item) -> Item
         end
     ).
@@ -124,12 +130,14 @@ map(MapFun) ->
 filter(Pred) ->
     ?stateless_operator(
         fun(?NEXT(Value)) ->
-              case Pred(Value) of
+              case safe_apply(Pred, Value) of
+                ?ERROR(ErrorInfo) -> ?ERROR(ErrorInfo);
                 true -> ?NEXT(Value);
                 false -> ?IGNORE
               end;
            (?LAST(Value)) ->
-              case Pred(Value) of
+              case safe_apply(Pred, Value) of
+                ?ERROR(ErrorInfo) -> ?ERROR(ErrorInfo);
                 true -> ?LAST(Value);
                 false -> ?COMPLETE
               end;
@@ -555,4 +563,30 @@ drop_item(?LAST(Value), MustDropPred, State, MustDropRef) ->
     end;
 drop_item(Item, _MustDropPred, State, MustDropRef) ->
     {Item, maps:put(MustDropRef, true, State)}.
+
+%%--------------------------------------------------------------------
+%% @doc Safely applies a function to a value, catching exceptions
+%% @param Fun Function to apply 
+%% @param Value Value to apply the function to
+%% @returns Either the result of Fun(Value) or {error, ErrorInfo} if an exception occurred
+%% @end
+%%--------------------------------------------------------------------
+-spec safe_apply(Fun, Value) -> Result | {error, ErrorInfo} when
+    Fun :: fun((A) -> B),
+    Value :: A,
+    Result :: B,
+    A :: any(),
+    B :: any(),
+    ErrorInfo :: any().
+safe_apply(Fun, Value) ->
+    try
+        Fun(Value)
+    catch
+        throw:ErrorInfo -> 
+            ?ERROR(ErrorInfo);
+        error:Reason:Stacktrace -> 
+            ?ERROR({runtime_error, Reason, Stacktrace});
+        exit:Reason -> 
+            ?ERROR({fatal_error, Reason})
+    end.
 

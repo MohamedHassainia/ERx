@@ -70,6 +70,22 @@ create(OnNext, OnError, OnComplete) ->
     #subscriber{on_next = OnNext, on_error =  OnError, on_complete = OnComplete}.
 
 %%--------------------------------------------------------------------
+%% @doc Creates a full subscriber with the following callbacks
+%% @param OnNext The callback for next values 
+%% @param OnError The callback for error events
+%% @returns A new subscriber record with all callbacks set
+%% @end
+%%--------------------------------------------------------------------
+-spec create(OnNext, OnError) -> t(A, ErrorInfo) when
+    OnNext     :: on_next(A),
+    OnError    :: on_error(ErrorInfo),
+    A :: any(),
+    ErrorInfo :: any().
+%%--------------------------------------------------------------------
+create(OnNext, OnError) ->
+    #subscriber{on_next = OnNext, on_error =  OnError}.
+
+%%--------------------------------------------------------------------
 %% @doc Retrieves a specific callback function from a subscriber
 %% @param CallbackFunName Which callback to get (on_next|on_error|on_complete) 
 %% @param Subscriber The subscriber record
